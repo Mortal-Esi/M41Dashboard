@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meal4One Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #0E1116;
+    --panel: #161B23;
+    --panel-2: #1D232D;
+    --border: #262E3A;
+    --text: #E7EBF2;
+    --text-dim: #8B96A8;
+    --text-faint: #5B6577;
+    --accent: #FF5A36;
+    --accent-dim: #7A3222;
+    --seg-a: #3DDC97;
+    --seg-b: #4C8CFF;
+    --warn: #F2B84B;
+    --purple: #B389F2;
+    --deal-super: #3DDC97;
+    --deal-good: #4C8CFF;
+    --deal-basic: #F2B84B;
+    --deal-weak: #E45A5A;
+    --deal-notfood: #4A5266;
+    --radius: 10px;
+    --mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family:var(--sans); }
+  body{ padding: 28px 32px 80px; }
+  h1,h2,h3{ margin:0; font-weight:600; letter-spacing:-0.01em; }
+
+  .header{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px; }
+  .header .title{ font-size:22px; color:var(--text); }
+  .header .title span{ color:var(--accent); }
+  .header .meta{ font-size:12px; color:var(--text-faint); font-family:var(--mono); }
+  .subtitle{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+
+  .tabs{ display:flex; gap:4px; margin-bottom:18px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .tab{ padding:10px 16px; font-size:13.5px; color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; user-select:none; transition:color .15s; white-space:nowrap; }
+  .tab:hover{ color:var(--text); }
+  .tab.active{ color:var(--text); border-bottom-color:var(--accent); }
+
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+
+  .filter-bar{ display:flex; align-items:center; gap:10px; margin-bottom:18px; padding:10px 14px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); flex-wrap:wrap; }
+  .filter-bar .flabel{ font-size:11.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.03em; }
+  .filter-chip{ padding:5px 12px; border-radius:16px; font-size:12px; cursor:pointer; border:1px solid var(--border); color:var(--text-dim); transition:all .12s; }
+  .filter-chip:hover{ border-color:var(--accent); color:var(--text); }
+  .filter-chip.active{ background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+
+  .breadcrumb{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); margin-bottom:18px; flex-wrap:wrap; }
+  .crumb{ cursor:pointer; padding:4px 10px; border-radius:6px; transition:background .12s; }
+  .crumb:hover{ background:var(--panel-2); color:var(--text); }
+  .crumb.current{ color:var(--text); font-weight:600; cursor:default; }
+  .crumb.current:hover{ background:none; }
+  .crumb-sep{ color:var(--text-faint); }
+
+  .stat-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px; margin-bottom:22px; }
+  .stat-card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
+  .stat-card .label{ font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px; }
+  .stat-card .value{ font-size:24px; font-weight:600; font-family:var(--mono); }
+  .stat-card .value.small{ font-size:17px; }
+  .stat-card .sub{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+  .stat-card .pct-tag{ font-size:11px; color:var(--text-faint); font-family:var(--mono); margin-left:4px; }
+  .stat-card.accent .value{ color:var(--accent); }
+  .stat-card.seg-a .value{ color:var(--seg-a); }
+  .stat-card.seg-b .value{ color:var(--seg-b); }
+  .stat-card.purple .value{ color:var(--purple); }
+  .stat-card.warn .value{ color:var(--warn); }
+
+  .card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+  .list-card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; cursor:pointer; transition:border-color .12s, transform .12s; }
+  .list-card:hover{ border-color:var(--accent); transform:translateY(-1px); }
+  .list-card .name{ font-size:15px; font-weight:600; margin-bottom:10px; }
+  .list-card .row{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-dim); padding:3px 0; }
+  .list-card .row b{ color:var(--text); font-family:var(--mono); font-weight:600; }
+  .list-card .row .pct{ color:var(--text-faint); font-size:11px; margin-left:4px; }
+  .list-card .bar{ height:5px; border-radius:3px; background:var(--panel-2); overflow:hidden; margin:10px 0 8px; display:flex; }
+  .list-card .bar .a{ background:var(--seg-a); }
+  .list-card .bar .b{ background:var(--seg-b); }
+  .list-card .bar .o{ background:var(--text-faint); opacity:.4; }
+
+  .table-wrap{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:auto; max-height:70vh; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  thead th{ text-align:left; padding:9px 12px; font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint); border-bottom:1px solid var(--border); background:var(--panel-2); position:sticky; top:0; white-space:nowrap; cursor:default; }
+  tbody td{ padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-dim); white-space:nowrap; }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr:hover td{ background:var(--panel-2); color:var(--text); }
+  tbody tr.clickable{ cursor:pointer; }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:20px; font-size:10.5px; font-weight:600; font-family:var(--mono); }
+  .badge.seg-A{ background:rgba(61,220,151,.14); color:var(--seg-a); }
+  .badge.seg-B{ background:rgba(76,140,255,.14); color:var(--seg-b); }
+  .badge.seg-C{ background:rgba(242,184,75,.14); color:var(--warn); }
+  .badge.seg-D{ background:rgba(228,90,90,.14); color:var(--deal-weak); }
+  .badge.seg-Unknown, .badge.seg-Not{ background:rgba(74,82,102,.3); color:var(--text-faint); }
+  .badge.tc{ background:rgba(255,90,54,.16); color:var(--accent); margin-left:4px; }
+  .badge.kit{ background:rgba(179,137,242,.16); color:var(--purple); margin-left:4px; }
+  .badge.sub-d{ background:rgba(76,140,255,.14); color:var(--seg-b); margin-left:4px; }
+  .badge.sub-c{ background:rgba(242,184,75,.14); color:var(--warn); margin-left:4px; }
+  .badge.deal-Super{ background:rgba(61,220,151,.14); color:var(--deal-super); }
+  .badge.deal-Good{ background:rgba(76,140,255,.14); color:var(--deal-good); }
+  .badge.deal-Basic{ background:rgba(242,184,75,.14); color:var(--deal-basic); }
+  .badge.deal-Weak{ background:rgba(228,90,90,.14); color:var(--deal-weak); }
+  .badge.deal-Not{ background:rgba(74,82,102,.3); color:var(--text-faint); }
+  .badge.status-Elite{ background:rgba(61,220,151,.14); color:var(--seg-a); }
+  .badge.status-Healthy{ background:rgba(76,140,255,.14); color:var(--seg-b); }
+  .badge.status-Moderate{ background:rgba(242,184,75,.14); color:var(--warn); }
+  .badge.status-Low{ background:rgba(228,90,90,.14); color:var(--deal-weak); }
+  .dim{ color:var(--text-faint); }
+
+  .section-title{ font-size:13px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em; margin:32px 0 14px; }
+  .section-title:first-child{ margin-top:0; }
+  .section-note{ font-size:11.5px; color:var(--text-faint); margin:-8px 0 16px; }
+
+  .chart-row{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; margin-bottom:22px; }
+  .chart-box{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; }
+  .chart-box h3{ font-size:13px; color:var(--text-dim); font-weight:600; margin-bottom:14px; }
+  .chart-box canvas{ max-height:260px; }
+
+  .toggle-group{ display:inline-flex; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:3px; gap:2px; }
+  .toggle-btn{ padding:6px 14px; font-size:12.5px; border-radius:6px; cursor:pointer; color:var(--text-dim); transition:all .12s; }
+  .toggle-btn.active{ background:var(--accent); color:#fff; font-weight:600; }
+
+  .empty-state{ text-align:center; padding:60px 20px; color:var(--text-faint); font-size:13px; }
+
+  .search-box{ width:100%; max-width:340px; padding:9px 14px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; margin-bottom:16px; }
+  .search-box::placeholder{ color:var(--text-faint); }
+  .search-box:focus{ outline:none; border-color:var(--accent); }
+
+  .flex-between{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+
+  .progress-row{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .progress-row .plabel{ width:130px; font-size:12px; color:var(--text-dim); flex-shrink:0; }
+  .progress-row .ptrack{ flex:1; height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
+  .progress-row .pfill{ height:100%; border-radius:4px; }
+  .progress-row .pval{ width:60px; text-align:right; font-family:var(--mono); font-size:12px; flex-shrink:0; }
+
+  .detail-panel{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+  .detail-panel .dname{ font-size:17px; font-weight:600; margin-bottom:14px; }
+  .detail-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  .detail-item .dlabel{ font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px; }
+  .detail-item .dvalue{ font-size:15px; font-family:var(--mono); font-weight:600; }
+  .close-detail{ float:right; cursor:pointer; color:var(--text-faint); font-size:12px; }
+  .close-detail:hover{ color:var(--text); }
+
+  ::-webkit-scrollbar{ width:10px; height:10px; }
+  ::-webkit-scrollbar-track{ background:var(--bg); }
+  ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:5px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">Meal4One <span>Dashboard</span></div>
+  <div class="meta" id="generatedAt">loading…</div>
+</div>
+<div class="subtitle">Vendor coverage, pack distribution, ratings, order share &amp; coverage model across cities</div>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-panel="vendorCoverage">Vendor Coverage</div>
+  <div class="tab" data-panel="packDistribution">Pack Distribution</div>
+  <div class="tab" data-panel="rating">Rating</div>
+  <div class="tab" data-panel="orderShare">Order Share &amp; Engagement</div>
+  <div class="tab" data-panel="kitchen">Kitchen</div>
+  <div class="tab" data-panel="coverageModel">Coverage Model</div>
+</div>
+
+<div id="filterBarHost"></div>
+
+<div id="root">
+  <div class="empty-state">Loading dashboard_data.json…</div>
+</div>
+
+<script>
+/* ============================================================
+   STATE
+   ============================================================ */
+let DATA = null;
+let currentPanel = 'vendorCoverage';
+let drill = { vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null} };
+let orderWindow = 'mtd';
+let superTypeFilter = 'all'; // 'all' or a group key from SUPER_TYPE_GROUPS
+const charts = {};
+
+const BUCKET_ORDER = ['0-2','2-4','4-6','6-8','8-10'];
+const DEAL_TYPES = ['Super','Good','Basic','Weak','Not Food'];
+const DEAL_COLORS = { Super:'#3DDC97', Good:'#4C8CFF', Basic:'#F2B84B', Weak:'#E45A5A', 'Not Food':'#4A5266' };
+const STATUS_COLORS = { Elite:'#3DDC97', Healthy:'#4C8CFF', Moderate:'#F2B84B', Low:'#E45A5A' };
+
+const SUPER_TYPE_LABELS = { 1: 'Restaurant', 2: 'Cafe', 3: 'Juice' };
+function superTypeGroups(){
+  const ids = DATA.meta.superTypeIds || [];
+  const groups = [];
+  [1,2,3].forEach(id => { if(ids.includes(id)) groups.push({ key:String(id), label:SUPER_TYPE_LABELS[id], ids:[id] }); });
+  const otherIds = ids.filter(id => ![1,2,3].includes(id));
+  if(otherIds.length) groups.push({ key:'other', label:'Non-Food', ids:otherIds });
+  return groups;
+}
+
+function fmt(n){ return Number(n||0).toLocaleString('en-US'); }
+function pct1(n){ return (Number(n||0)).toFixed(1)+'%'; }
+function shareToPct(n){ return (Number(n||0)*100).toFixed(1)+'%'; }
+function toman(n){ return fmt(Math.round(n||0)) + ' T'; }
+
+/* ============================================================
+   LOAD DATA
+   ============================================================ */
+fetch('./dashboard_data.json')
+  .then(r => { if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+  .then(json => {
+    DATA = json;
+    document.getElementById('generatedAt').textContent =
+      'Generated ' + new Date(json.generatedAt).toLocaleString('en-US', {dateStyle:'medium', timeStyle:'short'});
+    renderFilterBar();
+    render();
+  })
+  .catch(err => {
+    document.getElementById('root').innerHTML =
+      '<div class="empty-state">Could not load dashboard_data.json<br><br>' +
+      'Run <code>node update_dashboard.js</code> in this folder first, then reload this page.<br><br>' +
+      '<span style="color:var(--text-faint); font-size:11px;">' + err.message + '</span></div>';
+  });
+
+/* ============================================================
+   GLOBAL FILTER BAR (Vendor Type) — applies to all tabs except Coverage Model
+   ============================================================ */
+function renderFilterBar(){
+  const groups = superTypeGroups();
+  const host = document.getElementById('filterBarHost');
+  if(!groups.length){ host.innerHTML = ''; return; }
+  host.innerHTML = `
+    <div class="filter-bar" id="superTypeFilterBar">
+      <span class="flabel">Vendor Type</span>
+      <span class="filter-chip ${superTypeFilter==='all'?'active':''}" data-super="all">All</span>
+      ${groups.map(g => `<span class="filter-chip ${superTypeFilter===g.key?'active':''}" data-super="${g.key}">${g.label}</span>`).join('')}
+    </div>`;
+  host.querySelectorAll('.filter-chip').forEach(el => {
+    el.addEventListener('click', () => {
+      superTypeFilter = el.dataset.super;
+      drill.vendorCoverage = {city:null, area:null, vendorId:null};
+      drill.packDistribution = {city:null, area:null};
+      renderFilterBar();
+      render();
+    });
+  });
+}
+function filterBarVisible(){
+  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen') ? 'none' : '';
+}
+function matchesSuperType(item){
+  if(superTypeFilter === 'all') return true;
+  const groups = superTypeGroups();
+  const g = groups.find(g => g.key === superTypeFilter);
+  if(!g) return true;
+  return g.ids.includes(Number(item.superTypeId));
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if(!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  currentPanel = tab.dataset.panel;
+  render();
+});
+
+/* ============================================================
+   RENDER DISPATCH
+   ============================================================ */
+function render(){
+  if(!DATA) return;
+  filterBarVisible();
+  const root = document.getElementById('root');
+  if(currentPanel === 'vendorCoverage') root.innerHTML = renderVendorCoverage();
+  else if(currentPanel === 'packDistribution') root.innerHTML = renderPackDistribution();
+  else if(currentPanel === 'rating') root.innerHTML = renderRating();
+  else if(currentPanel === 'orderShare') root.innerHTML = renderOrderShare();
+  else if(currentPanel === 'kitchen') root.innerHTML = renderKitchen();
+  else if(currentPanel === 'coverageModel') root.innerHTML = renderCoverageModel();
+  attachHandlers();
+}
+
+/* ============================================================
+   Recompute helpers for client-side SuperType filtering
+   ============================================================ */
+function recomputeVendorBlock(vendors){
+  const total = vendors.length;
+  const segA = vendors.filter(v=>v.segment==='A').length;
+  const segB = vendors.filter(v=>v.segment==='B').length;
+  const kitchen = vendors.filter(v=>v.kitchen).length;
+  const discSub = vendors.filter(v=>v.discountSubsidy).length;
+  const coupSub = vendors.filter(v=>v.couponSubsidy).length;
+  const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
+  return {
+    total, segmentA:segA, segmentA_pct:p(segA,total), segmentB:segB, segmentB_pct:p(segB,total),
+    topCriticalInA: vendors.filter(v=>v.segment==='A'&&v.topCritical).length,
+    kitchen, kitchen_pct:p(kitchen,total),
+    discountSubsidy:discSub, discountSubsidy_pct:p(discSub,total),
+    couponSubsidy:coupSub, couponSubsidy_pct:p(coupSub,total),
+    vendors,
+  };
+}
+function recomputePackBlock(packs){
+  const total = packs.length;
+  const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
+  const dealTypeCounts = {}, dealTypePcts = {};
+  DEAL_TYPES.forEach(dt => { const c = packs.filter(x=>x.dealType===dt).length; dealTypeCounts[dt]=c; dealTypePcts[dt]=p(c,total); });
+  const kitchen = packs.filter(x=>x.kitchen).length;
+  const discSub = packs.filter(x=>x.discountSubsidy).length;
+  const coupSub = packs.filter(x=>x.couponSubsidy).length;
+  const k0 = packs.filter(x=>!x.kitchen);
+  const avgDiscount = k0.length ? Math.round(k0.reduce((s,x)=>s+x.snappDiscountToman,0)/k0.length) : 0;
+  return {
+    total, dealTypeCounts, dealTypePcts, kitchen, kitchen_pct:p(kitchen,total),
+    discountSubsidy:discSub, discountSubsidy_pct:p(discSub,total),
+    couponSubsidy:coupSub, couponSubsidy_pct:p(coupSub,total),
+    avgSnappDiscountToman: avgDiscount,
+    packs,
+  };
+}
+function recomputeRatingBlock(rows){
+  const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
+  const rated = rows.filter(r=>r.bucket!==null);
+  const totalAll = rows.length;
+  const noRating = totalAll - rated.length;
+  const buckets = {}, bucketPcts = {};
+  BUCKET_ORDER.forEach(b => { const c = rated.filter(r=>r.bucket===b).length; buckets[b]=c; bucketPcts[b]=p(c,rated.length); });
+  return {
+    avgRate: rated.length ? Math.round((rated.reduce((s,r)=>s+r.rate,0)/rated.length)*100)/100 : 0,
+    ratedCount: rated.length, ratedCount_pct: p(rated.length,totalAll),
+    noRatingCount: noRating, noRatingCount_pct: p(noRating,totalAll),
+    buckets, bucketPcts,
+  };
+}
+
+/* ============================================================
+   MODULE 1: VENDOR COVERAGE
+   ============================================================ */
+function renderVendorCoverage(){
+  const d = drill.vendorCoverage;
+  const vc = DATA.vendorCoverage;
+  const filtered = superTypeFilter !== 'all';
+
+  if(d.vendorId){
+    return renderVendorDetail(d);
+  }
+
+  if(!d.city){
+    let cities;
+    if(!filtered){
+      cities = Object.entries(vc).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      cities = Object.entries(vc).map(([city, cdata]) => {
+        const allVendors = Object.values(cdata.areas).flatMap(a=>a.vendors);
+        const matched = allVendors.filter(matchesSuperType);
+        return [city, recomputeVendorBlock(matched)];
+      }).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const totalVendors = cities.reduce((s,[,v])=>s+v.total,0);
+    const totalA = cities.reduce((s,[,v])=>s+v.segmentA,0);
+    const totalB = cities.reduce((s,[,v])=>s+v.segmentB,0);
+    const totalTC = cities.reduce((s,[,v])=>s+v.topCriticalInA,0);
+    const totalKitchen = cities.reduce((s,[,v])=>s+v.kitchen,0);
+    const totalDiscSub = cities.reduce((s,[,v])=>s+v.discountSubsidy,0);
+    const totalCoupSub = cities.reduce((s,[,v])=>s+v.couponSubsidy,0);
+
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="stat-row">
+        <div class="stat-card"><div class="label">Total Vendors</div><div class="value">${fmt(totalVendors)}</div></div>
+        <div class="stat-card seg-a"><div class="label">Segment A</div><div class="value">${fmt(totalA)}<span class="pct-tag">${pct1(totalVendors?totalA/totalVendors*100:0)}</span></div></div>
+        <div class="stat-card seg-b"><div class="label">Segment B</div><div class="value">${fmt(totalB)}<span class="pct-tag">${pct1(totalVendors?totalB/totalVendors*100:0)}</span></div></div>
+        <div class="stat-card accent"><div class="label">Top Critical (in A)</div><div class="value">${fmt(totalTC)}</div></div>
+        <div class="stat-card purple"><div class="label">Kitchen Vendors</div><div class="value">${fmt(totalKitchen)}<span class="pct-tag">${pct1(totalVendors?totalKitchen/totalVendors*100:0)}</span></div></div>
+        <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(totalDiscSub)}<span class="pct-tag">${pct1(totalVendors?totalDiscSub/totalVendors*100:0)}</span></div></div>
+        <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(totalCoupSub)}<span class="pct-tag">${pct1(totalVendors?totalCoupSub/totalVendors*100:0)}</span></div></div>
+      </div>
+      <div class="section-title">Cities</div>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => cityCard(city,v)).join('')}
+      </div>`;
+  }
+
+  if(d.city && !d.area){
+    const cdata = vc[d.city];
+    let areas;
+    if(!filtered){
+      areas = Object.entries(cdata.areas).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      areas = Object.entries(cdata.areas).map(([area, adata]) => {
+        const matched = adata.vendors.filter(matchesSuperType);
+        return [area, recomputeVendorBlock(matched)];
+      }).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const cBlock = filtered ? recomputeVendorBlock(areas.flatMap(([,v])=>v.vendors)) : cdata;
+    return `
+      ${breadcrumb(['All Cities', d.city], ['vc-city-null', null])}
+      <div class="stat-row">
+        <div class="stat-card"><div class="label">Total Vendors</div><div class="value">${fmt(cBlock.total)}</div></div>
+        <div class="stat-card seg-a"><div class="label">Segment A</div><div class="value">${fmt(cBlock.segmentA)}<span class="pct-tag">${pct1(cBlock.segmentA_pct)}</span></div></div>
+        <div class="stat-card seg-b"><div class="label">Segment B</div><div class="value">${fmt(cBlock.segmentB)}<span class="pct-tag">${pct1(cBlock.segmentB_pct)}</span></div></div>
+        <div class="stat-card accent"><div class="label">Top Critical (in A)</div><div class="value">${fmt(cBlock.topCriticalInA)}</div></div>
+        <div class="stat-card purple"><div class="label">Kitchen Vendors</div><div class="value">${fmt(cBlock.kitchen)}<span class="pct-tag">${pct1(cBlock.kitchen_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(cBlock.discountSubsidy)}<span class="pct-tag">${pct1(cBlock.discountSubsidy_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(cBlock.couponSubsidy)}<span class="pct-tag">${pct1(cBlock.couponSubsidy_pct)}</span></div></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => areaCard(area,v)).join('')}
+      </div>`;
+  }
+
+  const rawArea = vc[d.city].areas[d.area];
+  const adata = filtered ? recomputeVendorBlock(rawArea.vendors.filter(matchesSuperType)) : rawArea;
+  const vendors = [...adata.vendors].sort((a,b)=> (b.topCritical - a.topCritical) || a.segment.localeCompare(b.segment));
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['vc-city-null', 'vc-area-null', null])}
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">Vendors</div><div class="value">${fmt(adata.total)}</div></div>
+      <div class="stat-card seg-a"><div class="label">Segment A</div><div class="value">${fmt(adata.segmentA)}<span class="pct-tag">${pct1(adata.segmentA_pct)}</span></div></div>
+      <div class="stat-card seg-b"><div class="label">Segment B</div><div class="value">${fmt(adata.segmentB)}<span class="pct-tag">${pct1(adata.segmentB_pct)}</span></div></div>
+      <div class="stat-card accent"><div class="label">Top Critical (in A)</div><div class="value">${fmt(adata.topCriticalInA)}</div></div>
+      <div class="stat-card purple"><div class="label">Kitchen</div><div class="value">${fmt(adata.kitchen)}<span class="pct-tag">${pct1(adata.kitchen_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(adata.discountSubsidy)}<span class="pct-tag">${pct1(adata.discountSubsidy_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(adata.couponSubsidy)}<span class="pct-tag">${pct1(adata.couponSubsidy_pct)}</span></div></div>
+    </div>
+    <div class="flex-between">
+      <input class="search-box" id="vendorSearch" placeholder="Filter vendors by name…" style="margin-bottom:0">
+      <div class="toggle-group">
+        <div class="toggle-btn ${orderWindow==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${orderWindow==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="section-note">Entry Date is the vendor's earliest coupon start date. Market Share = vendor's share of all platform orders in its area. M4O Area Share = vendor's share of all Meal4One orders placed with vendors in its area.</div>
+    <div class="table-wrap">
+      <table id="vendorTable">
+        <thead><tr><th>Vendor</th><th>Segment</th><th>Top Critical</th><th>Kitchen</th><th>Entry Date</th><th>M4O Orders</th><th>Platform Orders</th><th>M4O Share</th><th>Market Share</th><th>M4O Area Share</th></tr></thead>
+        <tbody>
+          ${vendors.map(v => {
+            const orders = orderWindow === 'yesterday' ? v.ordersYesterday : v.ordersMtd;
+            const platform = orderWindow === 'yesterday' ? v.platformOrdersYesterday : v.platformOrdersMtd;
+            const marketShare = orderWindow === 'yesterday' ? v.vendorMarketShare : v.vendorMarketShareMtd;
+            const areaShare = orderWindow === 'yesterday' ? v.m4oAreaShare : v.m4oAreaShareMtd;
+            return `<tr class="clickable" data-action="vc-vendor" data-vendor-id="${v.id}" data-name="${escapeHtml(v.name.toLowerCase())}">
+            <td>${escapeHtml(v.name)}</td>
+            <td><span class="badge seg-${v.segment}">${v.segment}</span></td>
+            <td>${v.topCritical ? '<span class="badge tc">TC</span>' : '<span class="dim">—</span>'}</td>
+            <td>${v.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
+            <td>${v.entryDate || '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${fmt(orders)}</td>
+            <td style="font-family:var(--mono)">${fmt(platform)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${platform ? shareToPct(orders/platform) : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${marketShare !== null ? shareToPct(marketShare) : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${areaShare !== null ? shareToPct(areaShare) : '<span class="dim">—</span>'}</td>
+          </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderVendorDetail(d){
+  const vc = DATA.vendorCoverage;
+  const area = vc[d.city].areas[d.area];
+  const v = area.vendors.find(x => String(x.id) === String(d.vendorId));
+  if(!v) return `<div class="empty-state">Vendor not found.</div>`;
+  const orderWin = orderWindow === 'yesterday' ? { orders: v.ordersYesterday, platform: v.platformOrdersYesterday, marketShare: v.vendorMarketShare } : { orders: v.ordersMtd, platform: v.platformOrdersMtd, marketShare: v.vendorMarketShareMtd };
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area, v.name], ['vc-city-null', 'vc-area-null', 'vc-vendor-null', null])}
+    <div class="detail-panel">
+      <div class="dname">${escapeHtml(v.name)}
+        <span class="badge seg-${v.segment}" style="margin-left:8px">${v.segment}</span>
+        ${v.topCritical ? '<span class="badge tc">Top Critical</span>' : ''}
+        ${v.kitchen ? '<span class="badge kit">Kitchen</span>' : ''}
+      </div>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="dlabel">City / Area</div><div class="dvalue" style="font-size:13px">${escapeHtml(d.city)} — ${escapeHtml(d.area)}</div></div>
+        <div class="detail-item"><div class="dlabel">Entry Date</div><div class="dvalue">${v.entryDate || '—'}</div></div>
+        <div class="detail-item"><div class="dlabel">Discount Subsidy</div><div class="dvalue">${v.discountSubsidy ? 'Yes' : 'No'}</div></div>
+        <div class="detail-item"><div class="dlabel">Coupon Subsidy</div><div class="dvalue">${v.couponSubsidy ? 'Yes' : 'No'}</div></div>
+      </div>
+    </div>
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Order Stats</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${orderWindow==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${orderWindow==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(orderWin.orders)}</div></div>
+      <div class="stat-card"><div class="label">Platform Orders</div><div class="value">${fmt(orderWin.platform)}</div></div>
+      <div class="stat-card accent"><div class="label">M4O Share</div><div class="value">${orderWin.platform ? shareToPct(orderWin.orders/orderWin.platform) : '—'}</div></div>
+      <div class="stat-card purple"><div class="label">Market Share (Area)</div><div class="value small">${orderWin.marketShare !== null ? shareToPct(orderWin.marketShare) : '—'}</div><div class="sub">Vendor's share of all platform orders in its area</div></div>
+    </div>`;
+}
+
+function recomputeVendorBlockCityLevel(vendors){ return recomputeVendorBlock(vendors); }
+
+function cityCard(city, v){
+  const other = v.total - v.segmentA - v.segmentB;
+  const pctA = v.total ? (v.segmentA/v.total*100) : 0;
+  const pctB = v.total ? (v.segmentB/v.total*100) : 0;
+  const pctO = v.total ? (other/v.total*100) : 0;
+  return `<div class="list-card" data-action="vc-city" data-city="${escapeAttr(city)}">
+    <div class="name">${escapeHtml(city)}</div>
+    <div class="row"><span>Total vendors</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Segment A</span><b>${fmt(v.segmentA)}<span class="pct">${pct1(v.segmentA_pct)}</span></b></div>
+    <div class="row"><span>Segment B</span><b>${fmt(v.segmentB)}<span class="pct">${pct1(v.segmentB_pct)}</span></b></div>
+    <div class="bar"><div class="a" style="width:${pctA}%"></div><div class="b" style="width:${pctB}%"></div><div class="o" style="width:${pctO}%"></div></div>
+    <div class="row"><span>Top Critical in A</span><b style="color:var(--accent)">${fmt(v.topCriticalInA)}</b></div>
+    <div class="row"><span>Kitchen</span><b>${fmt(v.kitchen)}<span class="pct">${pct1(v.kitchen_pct)}</span></b></div>
+  </div>`;
+}
+function areaCard(area, v){
+  const other = v.total - v.segmentA - v.segmentB;
+  const pctA = v.total ? (v.segmentA/v.total*100) : 0;
+  const pctB = v.total ? (v.segmentB/v.total*100) : 0;
+  const pctO = v.total ? (other/v.total*100) : 0;
+  return `<div class="list-card" data-action="vc-area" data-area="${escapeAttr(area)}">
+    <div class="name">${escapeHtml(area)}</div>
+    <div class="row"><span>Vendors</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Segment A / B</span><b>${v.segmentA} / ${v.segmentB}</b></div>
+    <div class="bar"><div class="a" style="width:${pctA}%"></div><div class="b" style="width:${pctB}%"></div><div class="o" style="width:${pctO}%"></div></div>
+    <div class="row"><span>Top Critical in A</span><b style="color:var(--accent)">${fmt(v.topCriticalInA)}</b></div>
+    <div class="row"><span>Kitchen</span><b>${fmt(v.kitchen)}<span class="pct">${pct1(v.kitchen_pct)}</span></b></div>
+  </div>`;
+}
+
+/* ============================================================
+   MODULE 2: PACK DISTRIBUTION
+   ============================================================ */
+function renderPackDistribution(){
+  const d = drill.packDistribution;
+  const pd = DATA.packDistribution;
+  const filtered = superTypeFilter !== 'all';
+
+  if(!d.city){
+    let cities;
+    if(!filtered){
+      cities = Object.entries(pd.byCity).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      cities = Object.entries(pd.byCity).map(([city, cdata]) => {
+        const allPacks = Object.values(cdata.areas).flatMap(a=>a.packs);
+        const matched = allPacks.filter(matchesSuperType);
+        return [city, recomputePackBlock(matched)];
+      }).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const overall = filtered ? recomputePackBlock(cities.flatMap(([,v])=>v.packs)) : pd;
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="stat-row">
+        <div class="stat-card"><div class="label">Total Packs</div><div class="value">${fmt(overall.total)}</div></div>
+        ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value" style="color:${DEAL_COLORS[dt]}">${fmt(overall.dealTypeCounts[dt]||0)}<span class="pct-tag">${pct1(overall.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
+        <div class="stat-card purple"><div class="label">Kitchen Packs</div><div class="value small">${fmt(overall.kitchen)}<span class="pct-tag">${pct1(overall.kitchen_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(overall.discountSubsidy)}<span class="pct-tag">${pct1(overall.discountSubsidy_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(overall.couponSubsidy)}<span class="pct-tag">${pct1(overall.couponSubsidy_pct)}</span></div></div>
+        <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(overall.avgSnappDiscountToman)}</div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>Deal Type Distribution</h3><canvas id="dealTypeChart"></canvas></div>
+        <div class="chart-box"><h3>Top Cities by Pack Count</h3><canvas id="cityPackChart"></canvas></div>
+      </div>
+      <div class="section-title">Cities</div>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => packCityCard(city,v)).join('')}
+      </div>`;
+  }
+
+  if(d.city && !d.area){
+    const cdata = pd.byCity[d.city];
+    let areas;
+    if(!filtered){
+      areas = Object.entries(cdata.areas).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      areas = Object.entries(cdata.areas).map(([area, adata]) => [area, recomputePackBlock(adata.packs.filter(matchesSuperType))]).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const cBlock = filtered ? recomputePackBlock(areas.flatMap(([,v])=>v.packs)) : cdata;
+    return `
+      ${breadcrumb(['All Cities', d.city], ['pd-city-null', null])}
+      <div class="stat-row">
+        <div class="stat-card"><div class="label">Total Packs</div><div class="value">${fmt(cBlock.total)}</div></div>
+        ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value" style="color:${DEAL_COLORS[dt]}">${fmt(cBlock.dealTypeCounts[dt]||0)}<span class="pct-tag">${pct1(cBlock.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
+        <div class="stat-card purple"><div class="label">Kitchen</div><div class="value small">${fmt(cBlock.kitchen)}<span class="pct-tag">${pct1(cBlock.kitchen_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(cBlock.discountSubsidy)}<span class="pct-tag">${pct1(cBlock.discountSubsidy_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(cBlock.couponSubsidy)}<span class="pct-tag">${pct1(cBlock.couponSubsidy_pct)}</span></div></div>
+        <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(cBlock.avgSnappDiscountToman)}</div></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => packAreaCard(area,v)).join('')}
+      </div>`;
+  }
+
+  const rawArea = pd.byCity[d.city].areas[d.area];
+  const adata = filtered ? recomputePackBlock(rawArea.packs.filter(matchesSuperType)) : rawArea;
+  const packs = [...adata.packs].sort((a,b)=> b.snappDiscountToman - a.snappDiscountToman);
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['pd-city-null', 'pd-area-null', null])}
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">Packs</div><div class="value">${fmt(adata.total)}</div></div>
+      ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value small" style="color:${DEAL_COLORS[dt]}">${fmt(adata.dealTypeCounts[dt]||0)}<span class="pct-tag">${pct1(adata.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
+      <div class="stat-card purple"><div class="label">Kitchen</div><div class="value small">${fmt(adata.kitchen)}<span class="pct-tag">${pct1(adata.kitchen_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(adata.discountSubsidy)}<span class="pct-tag">${pct1(adata.discountSubsidy_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(adata.couponSubsidy)}<span class="pct-tag">${pct1(adata.couponSubsidy_pct)}</span></div></div>
+      <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(adata.avgSnappDiscountToman)}</div></div>
+    </div>
+    <input class="search-box" id="packSearch" placeholder="Filter packs by title or vendor…">
+    <div class="table-wrap">
+      <table id="packTable">
+        <thead><tr><th>Pack</th><th>Vendor</th><th>Kitchen</th><th>Deal Type</th><th>Discount Sub.</th><th>Coupon Sub.</th><th>Price</th><th>Snapp Discount</th></tr></thead>
+        <tbody>
+          ${packs.map(p => `<tr data-name="${escapeHtml((p.title+' '+p.vendorName).toLowerCase())}">
+            <td>${escapeHtml(p.title||'—')}</td>
+            <td>${escapeHtml(p.vendorName)}</td>
+            <td>${p.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
+            <td><span class="badge deal-${(p.dealType||'').replace(' ','')||'Not'}">${p.dealType}</span></td>
+            <td>${p.discountSubsidy ? '<span class="badge sub-d">Yes</span>' : '<span class="dim">—</span>'}</td>
+            <td>${p.couponSubsidy ? '<span class="badge sub-c">Yes</span>' : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${toman(p.price)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${toman(p.snappDiscountToman)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function packCityCard(city, v){
+  return `<div class="list-card" data-action="pd-city" data-city="${escapeAttr(city)}">
+    <div class="name">${escapeHtml(city)}</div>
+    <div class="row"><span>Total packs</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Super</span><b style="color:${DEAL_COLORS.Super}">${fmt(v.dealTypeCounts.Super||0)}<span class="pct">${pct1(v.dealTypePcts.Super||0)}</span></b></div>
+    <div class="row"><span>Good</span><b style="color:${DEAL_COLORS.Good}">${fmt(v.dealTypeCounts.Good||0)}<span class="pct">${pct1(v.dealTypePcts.Good||0)}</span></b></div>
+    <div class="row"><span>Kitchen</span><b>${fmt(v.kitchen)}<span class="pct">${pct1(v.kitchen_pct)}</span></b></div>
+    <div class="row"><span>Avg SF Discount</span><b style="color:var(--accent)">${toman(v.avgSnappDiscountToman)}</b></div>
+  </div>`;
+}
+function packAreaCard(area, v){
+  return `<div class="list-card" data-action="pd-area" data-area="${escapeAttr(area)}">
+    <div class="name">${escapeHtml(area)}</div>
+    <div class="row"><span>Packs</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Super / Good</span><b>${v.dealTypeCounts.Super||0} / ${v.dealTypeCounts.Good||0}</b></div>
+    <div class="row"><span>Basic / Weak</span><b>${v.dealTypeCounts.Basic||0} / ${v.dealTypeCounts.Weak||0}</b></div>
+    <div class="row"><span>Kitchen</span><b>${fmt(v.kitchen)}<span class="pct">${pct1(v.kitchen_pct)}</span></b></div>
+    <div class="row"><span>Avg SF Discount</span><b style="color:var(--accent)">${toman(v.avgSnappDiscountToman)}</b></div>
+  </div>`;
+}
+
+/* ============================================================
+   MODULE 3: RATING (per city AND per Marketing Area, SuperType-filterable)
+   ============================================================ */
+function renderRating(){
+  const d = drill.rating;
+  const r = DATA.rating;
+  const filtered = superTypeFilter !== 'all';
+
+  if(!d.city){
+    let cities;
+    if(!filtered){
+      cities = Object.entries(r.byCity).sort((a,b)=>b[1].avgRate-a[1].avgRate);
+    } else {
+      cities = Object.entries(r.byCity).map(([city, cdata]) => {
+        const allRows = Object.values(cdata.areas).flatMap(a=>a.rows);
+        const matched = allRows.filter(matchesSuperType);
+        return [city, recomputeRatingBlock(matched)];
+      }).filter(([,v]) => (v.ratedCount + v.noRatingCount) > 0).sort((a,b)=>b[1].avgRate-a[1].avgRate);
+    }
+    const overall = filtered ? recomputeRatingBlock(cities.flatMap(([city])=>r.byCity[city].rows.filter(matchesSuperType))) : r;
+
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Overall Avg Rate</div><div class="value">${overall.avgRate.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="label">Rated Packs</div><div class="value small">${fmt(overall.ratedCount)}<span class="pct-tag">${pct1(overall.ratedCount_pct)}</span></div></div>
+        <div class="stat-card warn"><div class="label">No Rating</div><div class="value small">${fmt(overall.noRatingCount)}<span class="pct-tag">${pct1(overall.noRatingCount_pct)}</span></div></div>
+        ${BUCKET_ORDER.map(b => `<div class="stat-card"><div class="label">${b}</div><div class="value small">${fmt(overall.buckets[b]||0)}<span class="pct-tag">${pct1(overall.bucketPcts[b]||0)}</span></div></div>`).join('')}
+      </div>
+      <div class="section-note">Percentages for 0-2…8-10 are of rated packs only; No Rating packs (Rate=0) are excluded from the average and bucket %s.</div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>Rate Distribution (all cities, rated only)</h3><canvas id="ratingBucketChart"></canvas></div>
+        <div class="chart-box"><h3>Avg Rate by City</h3><canvas id="cityRateChart"></canvas></div>
+      </div>
+      <div class="section-title">Cities</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>City</th><th>Avg Rate</th><th>Rated</th><th>No Rating</th><th>0-2</th><th>2-4</th><th>4-6</th><th>6-8</th><th>8-10</th></tr></thead>
+          <tbody>
+            ${cities.map(([city,v]) => `<tr class="clickable" data-action="rt-city" data-city="${escapeAttr(city)}">
+              <td>${escapeHtml(city)}</td>
+              <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${v.avgRate.toFixed(2)}</td>
+              <td>${fmt(v.ratedCount)} <span class="dim">(${pct1(v.ratedCount_pct)})</span></td>
+              <td style="color:var(--warn)">${fmt(v.noRatingCount)} <span class="dim">(${pct1(v.noRatingCount_pct)})</span></td>
+              ${BUCKET_ORDER.map(b => `<td>${fmt(v.buckets[b]||0)} <span class="dim">(${pct1(v.bucketPcts[b]||0)})</span></td>`).join('')}
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // City drilled in — show per Marketing Area
+  const cdata = r.byCity[d.city];
+  let areas;
+  if(!filtered){
+    areas = Object.entries(cdata.areas).sort((a,b)=>b[1].avgRate-a[1].avgRate);
+  } else {
+    areas = Object.entries(cdata.areas).map(([area, adata]) => [area, recomputeRatingBlock(adata.rows.filter(matchesSuperType))]).filter(([,v]) => (v.ratedCount+v.noRatingCount) > 0).sort((a,b)=>b[1].avgRate-a[1].avgRate);
+  }
+  const cBlock = filtered ? recomputeRatingBlock(areas.flatMap(([area])=>cdata.areas[area].rows.filter(matchesSuperType))) : cdata;
+
+  return `
+    ${breadcrumb(['All Cities', d.city], ['rt-city-null'])}
+    <div class="stat-row">
+      <div class="stat-card accent"><div class="label">Avg Rate</div><div class="value">${cBlock.avgRate.toFixed(2)}</div></div>
+      <div class="stat-card"><div class="label">Rated Packs</div><div class="value small">${fmt(cBlock.ratedCount)}<span class="pct-tag">${pct1(cBlock.ratedCount_pct)}</span></div></div>
+      <div class="stat-card warn"><div class="label">No Rating</div><div class="value small">${fmt(cBlock.noRatingCount)}<span class="pct-tag">${pct1(cBlock.noRatingCount_pct)}</span></div></div>
+      ${BUCKET_ORDER.map(b => `<div class="stat-card"><div class="label">${b}</div><div class="value small">${fmt(cBlock.buckets[b]||0)}<span class="pct-tag">${pct1(cBlock.bucketPcts[b]||0)}</span></div></div>`).join('')}
+    </div>
+    <div class="section-title">Marketing Areas (${areas.length})</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>Avg Rate</th><th>Rated</th><th>No Rating</th><th>0-2</th><th>2-4</th><th>4-6</th><th>6-8</th><th>8-10</th></tr></thead>
+        <tbody>
+          ${areas.map(([area,v]) => `<tr>
+            <td>${escapeHtml(area)}</td>
+            <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${v.avgRate.toFixed(2)}</td>
+            <td>${fmt(v.ratedCount)} <span class="dim">(${pct1(v.ratedCount_pct)})</span></td>
+            <td style="color:var(--warn)">${fmt(v.noRatingCount)} <span class="dim">(${pct1(v.noRatingCount_pct)})</span></td>
+            ${BUCKET_ORDER.map(b => `<td>${fmt(v.buckets[b]||0)} <span class="dim">(${pct1(v.bucketPcts[b]||0)})</span></td>`).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/* ============================================================
+   MODULE 4: ORDER SHARE & ENGAGEMENT
+   ============================================================ */
+function renderOrderShare(){
+  const os = DATA.orderShare;
+  const filtered = superTypeFilter !== 'all';
+  const tc = DATA.topCriticalEngagement;
+  const orderedV = os.orderedVendorsPct[orderWindow];
+  const orderedP = os.orderedPacksPct[orderWindow];
+  const d = drill.orderShare;
+
+  let overall, cities;
+  if(!filtered){
+    overall = orderWindow === 'yesterday' ? os.overallYesterday : os.overallMtd;
+    cities = Object.entries(os.byCity)
+      .map(([city,v]) => [city, orderWindow==='yesterday' ? v.yesterday : v.mtd, v.vendorCount])
+      .sort((a,b)=> b[1].m41Orders - a[1].m41Orders);
+  } else {
+    const field = orderWindow === 'yesterday' ? { m41:'m41Y', plat:'platY' } : { m41:'m41Mtd', plat:'platMtd' };
+    cities = Object.entries(os.byCity).map(([city, cdata]) => {
+      const allRows = Object.values(cdata.areas).flatMap(a=>a.rows);
+      const matched = allRows.filter(matchesSuperType);
+      const m41 = matched.reduce((s,r)=>s+r[field.m41],0);
+      const plat = matched.reduce((s,r)=>s+r[field.plat],0);
+      const vendorCount = matched.length;
+      return [city, { m41Orders:m41, platformOrders:plat }, vendorCount];
+    }).filter(([,v,vc]) => vc > 0).sort((a,b)=>b[1].m41Orders-a[1].m41Orders);
+    const totalM41 = cities.reduce((s,[,v])=>s+v.m41Orders,0);
+    const totalPlat = cities.reduce((s,[,v])=>s+v.platformOrders,0);
+    overall = { m41Orders: totalM41, platformOrders: totalPlat, share: totalPlat ? totalM41/totalPlat : 0 };
+  }
+
+  if(d.city){
+    return renderOrderShareCityDrill(d.city);
+  }
+
+  return `
+    <div class="flex-between">
+      <div class="breadcrumb" style="margin-bottom:0">Order share window</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${orderWindow==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${orderWindow==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="section-note">Two different denominators are used across this tab — "M4O vendors" means only vendors that carry Meal4One packs; "Total Platform" means every vendor on Snapp Food, M4O or not.</div>
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(overall.m41Orders)}</div></div>
+      <div class="stat-card"><div class="label">Platform Orders (M4O vendors only)</div><div class="value">${fmt(overall.platformOrders)}</div></div>
+      <div class="stat-card accent"><div class="label">M4O Share of Own Platform Orders</div><div class="value">${shareToPct(overall.share)}</div><div class="sub">M4O orders ÷ all orders placed with M4O vendors</div></div>
+      ${overall.areaM4OShare !== undefined ? `<div class="stat-card purple"><div class="label">M4O Share of Total Platform Orders</div><div class="value">${shareToPct(overall.areaM4OShare)}</div><div class="sub">M4O orders ÷ all orders on the platform, M4O and non-M4O vendors combined</div></div>` : ''}
+      <div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value">${shareToPct(tc.rate)}</div><div class="sub">${tc.numerator} / ${tc.denominator} vendors ordered M4O this month</div></div>
+      ${overall.ordersPerOrderedVendor !== undefined ? `<div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${overall.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(overall.orderedVendorCount)} vendors placed at least 1 order</div></div>` : ''}
+    </div>
+    ${overall.areaM4OShare === undefined ? '<div class="section-note">"M4O Share of Total Platform Orders" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
+    <div class="section-title">Ordered vs. Unordered</div>
+    <div class="stat-row">
+      <div class="stat-card seg-a"><div class="label">Vendors Ordered</div><div class="value small">${fmt(orderedV.ordered)}<span class="pct-tag">${pct1(orderedV.ordered_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Vendors Unordered</div><div class="value small">${fmt(orderedV.unordered)}<span class="pct-tag">${pct1(orderedV.unordered_pct)}</span></div></div>
+      <div class="stat-card seg-a"><div class="label">Packs Ordered</div><div class="value small">${fmt(orderedP.ordered)}<span class="pct-tag">${pct1(orderedP.ordered_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Packs Unordered</div><div class="value small">${fmt(orderedP.unordered)}<span class="pct-tag">${pct1(orderedP.unordered_pct)}</span></div></div>
+    </div>
+    <div class="section-note">A pack is "ordered" if its vendor received at least one Meal4One order in the selected window. (Ordered/Unordered totals are not affected by the Vendor Type filter.)</div>
+    <div class="chart-row">
+      <div class="chart-box"><h3>M4O Orders by City</h3><canvas id="m41ByCityChart"></canvas></div>
+      <div class="chart-box"><h3>M4O Share of Own Platform Orders, by City</h3><canvas id="shareByCityChart"></canvas></div>
+    </div>
+    <div class="section-title">Cities (${orderWindow === 'yesterday' ? 'Yesterday' : 'Month to Date'})</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>City</th><th>Vendors</th><th>M4O Orders</th><th>Platform Orders (M4O vendors)</th><th>O/V</th><th>M4O Share of Total Platform Orders</th><th>M4O Share of Own Platform Orders</th></tr></thead>
+        <tbody>
+          ${cities.map(([city,v,vendorCount]) => {
+            const cdata = os.byCity[city];
+            const win = orderWindow === 'yesterday' ? cdata.yesterday : cdata.mtd;
+            return `<tr class="clickable" data-action="os-city" data-city="${escapeAttr(city)}">
+            <td>${escapeHtml(city)}</td>
+            <td>${fmt(vendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.m41Orders)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.platformOrders)}</td>
+            <td style="font-family:var(--mono)">${win.ordersPerOrderedVendor !== undefined ? win.ordersPerOrderedVendor.toFixed(1) : '—'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${shareToPct(win.areaM4OShare)}</td>
+            <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${v.platformOrders ? shareToPct(v.m41Orders/v.platformOrders) : '—'}</td>
+          </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderOrderShareCityDrill(city){
+  const os = DATA.orderShare;
+  const cdata = os.byCity[city];
+  const win = orderWindow;
+  const cityWin = win === 'yesterday' ? cdata.yesterday : cdata.mtd;
+  const areas = Object.entries(cdata.areas)
+    .map(([area, adata]) => [area, win === 'yesterday' ? adata.yesterday : adata.mtd, adata.vendorCount])
+    .sort((a,b)=> b[1].m41Orders - a[1].m41Orders);
+
+  return `
+    ${breadcrumb(['All Cities', city], ['os-city-null'])}
+    <div class="flex-between">
+      <div class="breadcrumb" style="margin-bottom:0">Order share window</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${win==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${win==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(cityWin.m41Orders)}</div></div>
+      <div class="stat-card"><div class="label">Platform Orders (M4O vendors)</div><div class="value">${fmt(cityWin.platformOrders)}</div></div>
+      <div class="stat-card accent"><div class="label">M4O Share of Own Platform Orders</div><div class="value">${cityWin.platformOrders ? shareToPct(cityWin.m41Orders/cityWin.platformOrders) : '—'}</div></div>
+      <div class="stat-card purple"><div class="label">M4O Share of Total Platform Orders</div><div class="value">${shareToPct(cityWin.areaM4OShare)}</div></div>
+      <div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${cityWin.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(cityWin.orderedVendorCount)} vendors ordered</div></div>
+    </div>
+    <div class="section-title">Marketing Areas (${areas.length})</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>Vendors</th><th>M4O Orders</th><th>Platform Orders (M4O vendors)</th><th>O/V</th><th>Share of City's M4O Orders</th><th>M4O Share of Total Platform Orders (Area)</th></tr></thead>
+        <tbody>
+          ${areas.map(([area,v,vendorCount]) => `<tr>
+            <td>${escapeHtml(area)}</td>
+            <td>${fmt(vendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.m41Orders)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.platformOrders)}</td>
+            <td style="font-family:var(--mono)">${v.ordersPerOrderedVendor.toFixed(1)}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${cityWin.m41Orders ? shareToPct(v.m41Orders/cityWin.m41Orders) : '—'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${shareToPct(v.areaM4OShare)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="section-note">"Share of City's M4O Orders" = this area's Meal4One orders ÷ the city's total Meal4One orders. "M4O Share of Total Platform Orders (Area)" = this area's Meal4One orders ÷ all platform orders in that area (M4O and non-M4O vendors combined).</div>`;
+}
+
+/* ============================================================
+   MODULE 5: COVERAGE MODEL (live, includes "All Cities")
+   ============================================================ */
+/* ============================================================
+   MODULE: KITCHEN (dedicated view of Kitchen==1 vendors/packs)
+   ============================================================ */
+function renderKitchen(){
+  const k = DATA.kitchen;
+  if(!k){
+    return `<div class="empty-state">No Kitchen data available. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
+  }
+  const d = drill.kitchen;
+  const o = k.overall;
+  const nk = k.nonKitchenOverall;
+  const win = orderWindow;
+
+  if(!d.city){
+    const cities = Object.entries(k.byCity).sort((a,b)=>b[1].vendorCount-a[1].vendorCount);
+    const orders = win==='yesterday' ? 'ordersYesterday' : 'ordersMtd';
+    const platform = win==='yesterday' ? 'platformOrdersYesterday' : 'platformOrdersMtd';
+    const m4oShare = win==='yesterday' ? 'm4oShareYesterday' : 'm4oShareMtd';
+    const shareOfAll = win==='yesterday' ? 'shareOfAllM4OYesterday' : 'shareOfAllM4OMtd';
+    const totalVendors = o.vendorCount + nk.vendorCount;
+    const totalPacks = o.packCount + nk.packCount;
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="section-note">Kitchen vendors (Kitchen == 1) have a structurally different cost/discount model from regular vendors — this tab compares them directly against Non-Kitchen vendors.</div>
+      <div class="flex-between">
+        <div class="section-title" style="margin:0">Kitchen vs. Non-Kitchen</div>
+        <div class="toggle-group">
+          <div class="toggle-btn ${win==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+          <div class="toggle-btn ${win==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-bottom:22px">
+        <table>
+          <thead><tr><th>Metric</th><th style="color:var(--purple)">Kitchen</th><th>Non-Kitchen</th></tr></thead>
+          <tbody>
+            <tr><td>Vendors</td><td style="font-family:var(--mono)">${fmt(o.vendorCount)} <span class="dim">(${pct1(o.vendorCount/totalVendors*100)})</span></td><td style="font-family:var(--mono)">${fmt(nk.vendorCount)} <span class="dim">(${pct1(nk.vendorCount/totalVendors*100)})</span></td></tr>
+            <tr><td>Packs</td><td style="font-family:var(--mono)">${fmt(o.packCount)} <span class="dim">(${pct1(o.packCount/totalPacks*100)})</span></td><td style="font-family:var(--mono)">${fmt(nk.packCount)} <span class="dim">(${pct1(nk.packCount/totalPacks*100)})</span></td></tr>
+            <tr><td>Avg Rate</td><td style="font-family:var(--mono); color:var(--accent)">${o.avgRate.toFixed(2)}</td><td style="font-family:var(--mono); color:var(--accent)">${nk.avgRate.toFixed(2)}</td></tr>
+            <tr><td>Rated Packs</td><td style="font-family:var(--mono)">${fmt(o.ratedPackCount)}</td><td style="font-family:var(--mono)">${fmt(nk.ratedPackCount)}</td></tr>
+            <tr><td>Avg Snapp Discount</td><td>${o.avgSnappDiscountToman !== null ? toman(o.avgSnappDiscountToman) : '<span class="dim">N/A — see note below</span>'}</td><td style="font-family:var(--mono); color:var(--accent)">${toman(nk.avgSnappDiscountToman)}</td></tr>
+            <tr><td>M4O Orders (${win==='yesterday'?'Yesterday':'MTD'})</td><td style="font-family:var(--mono)">${fmt(o[orders])}</td><td style="font-family:var(--mono)">${fmt(nk[orders])}</td></tr>
+            <tr><td>Platform Orders (${win==='yesterday'?'Yesterday':'MTD'})</td><td style="font-family:var(--mono)">${fmt(o[platform])}</td><td style="font-family:var(--mono)">${fmt(nk[platform])}</td></tr>
+            <tr><td>M4O Share of Own Platform Orders</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(o[m4oShare])}</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(nk[m4oShare])}</td></tr>
+            <tr><td>Share of ALL M4O Orders (project-wide)</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(o[shareOfAll])}</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(nk[shareOfAll])}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="section-note">"Avg Snapp Discount" for Kitchen is N/A here because Kitchen packs use a structurally different pricing/discount model than regular packs — averaging them together (or even as a separate like-for-like average) isn't a meaningful comparison. See the README for details.</div>
+      <div class="section-title">Kitchen Cities</div>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => `<div class="list-card" data-action="kt-city" data-city="${escapeAttr(city)}">
+          <div class="name">${escapeHtml(city)}</div>
+          <div class="row"><span>Kitchen vendors</span><b>${fmt(v.vendorCount)}</b></div>
+          <div class="row"><span>Kitchen packs</span><b>${fmt(v.packCount)}</b></div>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  if(d.city && !d.area){
+    const cdata = k.byCity[d.city];
+    const areas = Object.entries(cdata.areas).sort((a,b)=>b[1].vendorCount-a[1].vendorCount);
+    return `
+      ${breadcrumb(['All Cities', d.city], ['kt-city-null'])}
+      <div class="stat-row">
+        <div class="stat-card purple"><div class="label">Kitchen Vendors</div><div class="value">${fmt(cdata.vendorCount)}</div></div>
+        <div class="stat-card purple"><div class="label">Kitchen Packs</div><div class="value">${fmt(cdata.packCount)}</div></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => `<div class="list-card" data-action="kt-area" data-area="${escapeAttr(area)}">
+          <div class="name">${escapeHtml(area)}</div>
+          <div class="row"><span>Kitchen vendors</span><b>${fmt(v.vendorCount)}</b></div>
+          <div class="row"><span>Kitchen packs</span><b>${fmt(v.packCount)}</b></div>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  const adata = k.byCity[d.city].areas[d.area];
+  const vendors = [...adata.vendors].sort((a,b)=> (win==='yesterday'?b.ordersYesterday-a.ordersYesterday:b.ordersMtd-a.ordersMtd));
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['kt-city-null', 'kt-area-null'])}
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Vendors (${adata.vendorCount})</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${win==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${win==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Vendor</th><th>Segment</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Platform Orders</th><th>M4O Share</th></tr></thead>
+        <tbody>
+          ${vendors.map(v => {
+            const orders = win==='yesterday' ? v.ordersYesterday : v.ordersMtd;
+            const platform = win==='yesterday' ? v.platformOrdersYesterday : v.platformOrdersMtd;
+            const share = win==='yesterday' ? v.m4oShareYesterday : v.m4oShareMtd;
+            return `<tr>
+            <td>${escapeHtml(v.name)}</td>
+            <td><span class="badge seg-${v.segment}">${v.segment}</span></td>
+            <td>${fmt(v.packCount)}</td>
+            <td>${v.avgRate !== null ? v.avgRate.toFixed(2) : '<span class="dim">No rating</span>'}</td>
+            <td style="font-family:var(--mono)">${fmt(orders)}</td>
+            <td style="font-family:var(--mono)">${fmt(platform)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${share !== null ? shareToPct(share) : '<span class="dim">—</span>'}</td>
+          </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderCoverageModel(){
+  const cm = DATA.coverageModel || { cityCoverage:{}, coverageResult:{} };
+  const cityNames = Object.keys(cm.cityCoverage || {});
+  if(!cityNames.length){
+    return `<div class="empty-state">No Coverage Model data available.<br>Check that COVERAGE_SPREADSHEET_ID is set in update_dashboard.js.</div>`;
+  }
+  const d = drill.coverageModel;
+
+  // Sort with "All Cities" first
+  const sortedCities = [...cityNames].sort((a,b) => a === 'All Cities' ? -1 : b === 'All Cities' ? 1 : 0);
+
+  if(!d.city){
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="section-note">Coverage model scores are read live from a separate Google Sheet, alongside the main data sheet.</div>
+      <div class="section-title">Cities</div>
+      <div class="card-grid">
+        ${sortedCities.map(city => coverageCityCard(city, cm.cityCoverage[city])).join('')}
+      </div>`;
+  }
+
+  const cityData = cm.cityCoverage[d.city];
+  const areaData = (cm.coverageResult && cm.coverageResult[d.city]) || {};
+  const allScope = cityData['All Areas'];
+  const topScope = cityData['Top Areas'];
+  const areas = Object.entries(areaData).sort((a,b)=> (b[1].totalUsers||0) - (a[1].totalUsers||0));
+
+  return `
+    ${breadcrumb(['All Cities', d.city], ['cm-city-null'])}
+    <div class="chart-row">
+      ${coverageScopeCard('All Marketing Areas', allScope)}
+      ${coverageScopeCard('Top Marketing Areas', topScope)}
+    </div>
+    ${areas.length ? `
+    <div class="section-title">Coverage by Marketing Area (${areas.length})</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>Status</th><th>Total Users</th><th>Elite</th><th>Healthy</th><th>Moderate</th><th>Low</th><th>Clusters</th><th>Avg Products/Cluster</th><th>Avg Super/Cluster</th></tr></thead>
+        <tbody>
+          ${areas.map(([area,v]) => `<tr>
+            <td>${escapeHtml(area)}</td>
+            <td><span class="badge status-${v.status}">${v.status}</span></td>
+            <td style="font-family:var(--mono)">${fmt(v.totalUsers)}</td>
+            <td>${fmt(v.elite.users)} <span class="dim">(${v.elite.pct}%)</span></td>
+            <td>${fmt(v.healthy.users)} <span class="dim">(${v.healthy.pct}%)</span></td>
+            <td>${fmt(v.moderate.users)} <span class="dim">(${v.moderate.pct}%)</span></td>
+            <td>${fmt(v.low.users)} <span class="dim">(${v.low.pct}%)</span></td>
+            <td>${fmt(v.totalClusters)}</td>
+            <td>${v.avgProductsPerCluster.toFixed(1)}</td>
+            <td>${v.avgSuperPerCluster.toFixed(1)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `<div class="section-note">No per-area breakdown available for this selection.</div>`}`;
+}
+
+function coverageCityCard(city, scopes){
+  const all = scopes['All Areas'];
+  if(!all) return '';
+  return `<div class="list-card" data-action="cm-city" data-city="${escapeAttr(city)}">
+    <div class="name">${escapeHtml(city)} ${all.status ? `<span class="badge status-${all.status}" style="margin-left:6px">${all.status}</span>` : ''}</div>
+    <div class="row"><span>Total users</span><b>${fmt(all.totalUsers)}</b></div>
+    <div class="row"><span>Elite</span><b style="color:${STATUS_COLORS.Elite}">${all.elite.pct}%</b></div>
+    <div class="row"><span>Healthy</span><b style="color:${STATUS_COLORS.Healthy}">${all.healthy.pct}%</b></div>
+    <div class="row"><span>Moderate</span><b style="color:${STATUS_COLORS.Moderate}">${all.moderate.pct}%</b></div>
+  </div>`;
+}
+function coverageScopeCard(title, scope){
+  if(!scope) return `<div class="chart-box"><h3>${title}</h3><div class="empty-state" style="padding:20px">No data</div></div>`;
+  return `<div class="chart-box">
+    <h3>${title} ${scope.status ? `<span class="badge status-${scope.status}" style="margin-left:6px">${scope.status}</span>` : ''}</h3>
+    <div style="font-size:12px; color:var(--text-faint); margin-bottom:14px">Total users: <b style="color:var(--text); font-family:var(--mono)">${fmt(scope.totalUsers)}</b></div>
+    ${progressRow('Elite', scope.elite.pct, STATUS_COLORS.Elite)}
+    ${progressRow('Healthy', scope.healthy.pct, STATUS_COLORS.Healthy)}
+    ${progressRow('Moderate', scope.moderate.pct, STATUS_COLORS.Moderate)}
+  </div>`;
+}
+function progressRow(label, value, color){
+  return `<div class="progress-row">
+    <div class="plabel">${label}</div>
+    <div class="ptrack"><div class="pfill" style="width:${value}%; background:${color}"></div></div>
+    <div class="pval">${value}%</div>
+  </div>`;
+}
+
+/* ============================================================
+   HANDLERS + BREADCRUMB
+   ============================================================ */
+function breadcrumb(labels, actions){
+  return `<div class="breadcrumb">
+    ${labels.map((l,i) => {
+      const isLast = i === labels.length-1;
+      const action = actions ? actions[i] : null;
+      return (i>0 ? '<span class="crumb-sep">/</span>' : '') +
+        `<span class="crumb ${isLast?'current':''}" ${action ? `data-crumb="${action}"` : ''}>${escapeHtml(l)}</span>`;
+    }).join('')}
+  </div>`;
+}
+
+function attachHandlers(){
+  document.querySelectorAll('[data-action="vc-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.vendorCoverage.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="vc-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.vendorCoverage.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-action="vc-vendor"]').forEach(el => {
+    el.addEventListener('click', () => { drill.vendorCoverage.vendorId = el.dataset.vendorId; render(); });
+  });
+  document.querySelectorAll('[data-action="pd-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.packDistribution.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="pd-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.packDistribution.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-action="rt-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.rating.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="cm-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.coverageModel.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="kt-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.kitchen.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="kt-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.kitchen.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-action="os-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.orderShare.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-crumb]').forEach(el => {
+    el.addEventListener('click', () => {
+      const [module, level] = el.dataset.crumb.split('-');
+      if(module === 'vc'){
+        if(level==='city') { drill.vendorCoverage.city=null; drill.vendorCoverage.area=null; drill.vendorCoverage.vendorId=null; }
+        if(level==='area'){ drill.vendorCoverage.area=null; drill.vendorCoverage.vendorId=null; }
+        if(level==='vendor'){ drill.vendorCoverage.vendorId=null; }
+      }
+      if(module === 'pd'){ if(level==='city') { drill.packDistribution.city=null; drill.packDistribution.area=null; } if(level==='area'){ drill.packDistribution.area=null; } }
+      if(module === 'rt'){ if(level==='city') { drill.rating.city=null; } }
+      if(module === 'cm'){ if(level==='city') { drill.coverageModel.city=null; } }
+      if(module === 'kt'){ if(level==='city') { drill.kitchen.city=null; drill.kitchen.area=null; } if(level==='area'){ drill.kitchen.area=null; } }
+      if(module === 'os'){ if(level==='city') { drill.orderShare.city=null; } }
+      render();
+    });
+  });
+  document.querySelectorAll('[data-window]').forEach(el => {
+    el.addEventListener('click', () => { orderWindow = el.dataset.window; render(); });
+  });
+
+  const vendorSearch = document.getElementById('vendorSearch');
+  if(vendorSearch) vendorSearch.addEventListener('input', () => filterTable('vendorTable', vendorSearch.value));
+  const packSearch = document.getElementById('packSearch');
+  if(packSearch) packSearch.addEventListener('input', () => filterTable('packTable', packSearch.value));
+
+  drawCharts();
+}
+
+function filterTable(tableId, query){
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
+    tr.style.display = tr.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+function destroyChart(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+
+function drawCharts(){
+  Object.keys(charts).forEach(destroyChart);
+
+  const gridColor = '#262E3A';
+  const textColor = '#8B96A8';
+  Chart.defaults.color = textColor;
+  Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto";
+  Chart.defaults.font.size = 11;
+
+  if(currentPanel === 'packDistribution' && !drill.packDistribution.city){
+    const filtered = superTypeFilter !== 'all';
+    let overall, cityTotals;
+    if(!filtered){
+      overall = DATA.packDistribution;
+      cityTotals = Object.entries(DATA.packDistribution.byCity).map(([c,v])=>[c,v.total]);
+    } else {
+      const cities = Object.entries(DATA.packDistribution.byCity).map(([city, cdata]) => {
+        const allPacks = Object.values(cdata.areas).flatMap(a=>a.packs);
+        return [city, allPacks.filter(matchesSuperType)];
+      });
+      overall = recomputePackBlock(cities.flatMap(([,p])=>p));
+      cityTotals = cities.map(([c,p])=>[c,p.length]);
+    }
+    const ctx1 = document.getElementById('dealTypeChart');
+    if(ctx1){
+      charts.dealTypeChart = new Chart(ctx1, {
+        type:'doughnut',
+        data:{ labels: DEAL_TYPES, datasets:[{ data: DEAL_TYPES.map(t=>overall.dealTypeCounts[t]||0), backgroundColor: DEAL_TYPES.map(t=>DEAL_COLORS[t]), borderWidth:0 }]},
+        options:{ plugins:{ legend:{ position:'right', labels:{ boxWidth:10, padding:12 } } } }
+      });
+    }
+    const ctx2 = document.getElementById('cityPackChart');
+    if(ctx2){
+      const top = cityTotals.sort((a,b)=>b[1]-a[1]).slice(0,8);
+      charts.cityPackChart = new Chart(ctx2, {
+        type:'bar',
+        data:{ labels: top.map(([c])=>c), datasets:[{ data: top.map(([,t])=>t), backgroundColor:'#FF5A36', borderRadius:4 }]},
+        options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}}, y:{grid:{display:false}} } }
+      });
+    }
+  }
+
+  if(currentPanel === 'rating' && !drill.rating.city){
+    const filtered = superTypeFilter !== 'all';
+    let overallBuckets;
+    let cityRates;
+    if(!filtered){
+      overallBuckets = DATA.rating.buckets;
+      cityRates = Object.entries(DATA.rating.byCity).map(([c,v])=>[c,v.avgRate]);
+    } else {
+      const cities = Object.entries(DATA.rating.byCity).map(([city, cdata]) => {
+        const allRows = Object.values(cdata.areas).flatMap(a=>a.rows);
+        return [city, recomputeRatingBlock(allRows.filter(matchesSuperType))];
+      }).filter(([,v]) => (v.ratedCount+v.noRatingCount) > 0);
+      overallBuckets = {};
+      BUCKET_ORDER.forEach(b => { overallBuckets[b] = cities.reduce((s,[,v])=>s+(v.buckets[b]||0),0); });
+      cityRates = cities.map(([c,v])=>[c,v.avgRate]);
+    }
+    const ctx1 = document.getElementById('ratingBucketChart');
+    if(ctx1){
+      charts.ratingBucketChart = new Chart(ctx1, {
+        type:'bar',
+        data:{ labels: BUCKET_ORDER, datasets:[{ data: BUCKET_ORDER.map(k=>overallBuckets[k]||0), backgroundColor:'#4C8CFF', borderRadius:4 }]},
+        options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:gridColor}} } }
+      });
+    }
+    const ctx2 = document.getElementById('cityRateChart');
+    if(ctx2){
+      const top = cityRates.sort((a,b)=>b[1]-a[1]);
+      charts.cityRateChart = new Chart(ctx2, {
+        type:'bar',
+        data:{ labels: top.map(([c])=>c), datasets:[{ data: top.map(([,v])=>v), backgroundColor:'#3DDC97', borderRadius:4 }]},
+        options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}, min:0, max:10}, y:{grid:{display:false}} } }
+      });
+    }
+  }
+
+  if(currentPanel === 'orderShare' && !drill.orderShare.city){
+    const os = DATA.orderShare;
+    const cities = Object.entries(os.byCity)
+      .map(([city,v]) => [city, orderWindow==='yesterday'?v.yesterday:v.mtd])
+      .sort((a,b)=> b[1].m41Orders - a[1].m41Orders).slice(0,10);
+
+    const ctx1 = document.getElementById('m41ByCityChart');
+    if(ctx1){
+      charts.m41ByCityChart = new Chart(ctx1, {
+        type:'bar',
+        data:{ labels: cities.map(([c])=>c), datasets:[{ data: cities.map(([,v])=>v.m41Orders), backgroundColor:'#FF5A36', borderRadius:4 }]},
+        options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}}, y:{grid:{display:false}} } }
+      });
+    }
+    const ctx2 = document.getElementById('shareByCityChart');
+    if(ctx2){
+      const shares = cities.map(([c,v]) => [c, v.platformOrders ? v.m41Orders/v.platformOrders : 0]).sort((a,b)=>b[1]-a[1]);
+      charts.shareByCityChart = new Chart(ctx2, {
+        type:'bar',
+        data:{ labels: shares.map(([c])=>c), datasets:[{ data: shares.map(([,s])=>(s*100).toFixed(1)), backgroundColor:'#4C8CFF', borderRadius:4 }]},
+        options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}, title:{display:true,text:'%'}}, y:{grid:{display:false}} } }
+      });
+    }
+  }
+}
+
+/* ============================================================
+   UTIL
+   ============================================================ */
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+</script>
+</body>
+</html>
