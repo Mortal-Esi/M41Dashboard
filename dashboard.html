@@ -191,6 +191,7 @@ const charts = {};
 const BUCKET_ORDER = ['0-2','2-4','4-6','6-8','8-10'];
 const DEAL_TYPES = ['Super','Good','Basic','Weak','Not Food'];
 const DEAL_COLORS = { Super:'#3DDC97', Good:'#4C8CFF', Basic:'#F2B84B', Weak:'#E45A5A', 'Not Food':'#4A5266' };
+const DEAL_CLASS = { Super:'Super', Good:'Good', Basic:'Basic', Weak:'Weak', 'Not Food':'Not' };
 const STATUS_COLORS = { Elite:'#3DDC97', Healthy:'#4C8CFF', Moderate:'#F2B84B', Low:'#E45A5A' };
 
 const SUPER_TYPE_LABELS = { 1: 'Restaurant', 2: 'Cafe', 3: 'Juice' };
@@ -452,10 +453,10 @@ function renderVendorCoverage(){
             const areaShare = orderWindow === 'yesterday' ? v.m4oAreaShare : v.m4oAreaShareMtd;
             return `<tr class="clickable" data-action="vc-vendor" data-vendor-id="${v.id}" data-name="${escapeHtml(v.name.toLowerCase())}">
             <td>${escapeHtml(v.name)}</td>
-            <td><span class="badge seg-${v.segment}">${v.segment}</span></td>
+            <td><span class="badge seg-${escapeAttr(v.segment)}">${escapeHtml(v.segment)}</span></td>
             <td>${v.topCritical ? '<span class="badge tc">TC</span>' : '<span class="dim">—</span>'}</td>
             <td>${v.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
-            <td>${v.entryDate || '<span class="dim">—</span>'}</td>
+            <td>${v.entryDate ? escapeHtml(v.entryDate) : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${fmt(orders)}</td>
             <td style="font-family:var(--mono)">${fmt(platform)}</td>
             <td style="font-family:var(--mono); color:var(--accent)">${platform ? shareToPct(orders/platform) : '<span class="dim">—</span>'}</td>
@@ -478,13 +479,13 @@ function renderVendorDetail(d){
     ${breadcrumb(['All Cities', d.city, d.area, v.name], ['vc-city-null', 'vc-area-null', 'vc-vendor-null', null])}
     <div class="detail-panel">
       <div class="dname">${escapeHtml(v.name)}
-        <span class="badge seg-${v.segment}" style="margin-left:8px">${v.segment}</span>
+        <span class="badge seg-${escapeAttr(v.segment)}" style="margin-left:8px">${escapeHtml(v.segment)}</span>
         ${v.topCritical ? '<span class="badge tc">Top Critical</span>' : ''}
         ${v.kitchen ? '<span class="badge kit">Kitchen</span>' : ''}
       </div>
       <div class="detail-grid">
         <div class="detail-item"><div class="dlabel">City / Area</div><div class="dvalue" style="font-size:13px">${escapeHtml(d.city)} — ${escapeHtml(d.area)}</div></div>
-        <div class="detail-item"><div class="dlabel">Entry Date</div><div class="dvalue">${v.entryDate || '—'}</div></div>
+        <div class="detail-item"><div class="dlabel">Entry Date</div><div class="dvalue">${v.entryDate ? escapeHtml(v.entryDate) : '—'}</div></div>
         <div class="detail-item"><div class="dlabel">Discount Subsidy</div><div class="dvalue">${v.discountSubsidy ? 'Yes' : 'No'}</div></div>
         <div class="detail-item"><div class="dlabel">Coupon Subsidy</div><div class="dvalue">${v.couponSubsidy ? 'Yes' : 'No'}</div></div>
       </div>
@@ -503,8 +504,6 @@ function renderVendorDetail(d){
       <div class="stat-card purple"><div class="label">Market Share (Area)</div><div class="value small">${orderWin.marketShare !== null ? shareToPct(orderWin.marketShare) : '—'}</div><div class="sub">Vendor's share of all platform orders in its area</div></div>
     </div>`;
 }
-
-function recomputeVendorBlockCityLevel(vendors){ return recomputeVendorBlock(vendors); }
 
 function cityCard(city, v){
   const other = v.total - v.segmentA - v.segmentB;
@@ -623,7 +622,7 @@ function renderPackDistribution(){
             <td>${escapeHtml(p.title||'—')}</td>
             <td>${escapeHtml(p.vendorName)}</td>
             <td>${p.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
-            <td><span class="badge deal-${(p.dealType||'').replace(' ','')||'Not'}">${p.dealType}</span></td>
+            <td><span class="badge deal-${DEAL_CLASS[p.dealType]||'Not'}">${escapeHtml(p.dealType)}</span></td>
             <td>${p.discountSubsidy ? '<span class="badge sub-d">Yes</span>' : '<span class="dim">—</span>'}</td>
             <td>${p.couponSubsidy ? '<span class="badge sub-c">Yes</span>' : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${toman(p.price)}</td>
@@ -834,10 +833,26 @@ function renderOrderShareCityDrill(city){
   const os = DATA.orderShare;
   const cdata = os.byCity[city];
   const win = orderWindow;
-  const cityWin = win === 'yesterday' ? cdata.yesterday : cdata.mtd;
-  const areas = Object.entries(cdata.areas)
-    .map(([area, adata]) => [area, win === 'yesterday' ? adata.yesterday : adata.mtd, adata.vendorCount])
-    .sort((a,b)=> b[1].m41Orders - a[1].m41Orders);
+  const filtered = superTypeFilter !== 'all';
+
+  let cityWin, areas;
+  if(!filtered){
+    cityWin = win === 'yesterday' ? cdata.yesterday : cdata.mtd;
+    areas = Object.entries(cdata.areas)
+      .map(([area, adata]) => [area, win === 'yesterday' ? adata.yesterday : adata.mtd, adata.vendorCount])
+      .sort((a,b)=> b[1].m41Orders - a[1].m41Orders);
+  } else {
+    const field = win === 'yesterday' ? { m41:'m41Y', plat:'platY' } : { m41:'m41Mtd', plat:'platMtd' };
+    areas = Object.entries(cdata.areas).map(([area, adata]) => {
+      const matched = adata.rows.filter(matchesSuperType);
+      const m41 = matched.reduce((s,r)=>s+r[field.m41],0);
+      const plat = matched.reduce((s,r)=>s+r[field.plat],0);
+      return [area, { m41Orders:m41, platformOrders:plat }, matched.length];
+    }).filter(([,,vc]) => vc > 0).sort((a,b)=> b[1].m41Orders - a[1].m41Orders);
+    const totalM41 = areas.reduce((s,[,v])=>s+v.m41Orders,0);
+    const totalPlat = areas.reduce((s,[,v])=>s+v.platformOrders,0);
+    cityWin = { m41Orders: totalM41, platformOrders: totalPlat };
+  }
 
   return `
     ${breadcrumb(['All Cities', city], ['os-city-null'])}
@@ -852,9 +867,10 @@ function renderOrderShareCityDrill(city){
       <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(cityWin.m41Orders)}</div></div>
       <div class="stat-card"><div class="label">Platform Orders (M4O vendors)</div><div class="value">${fmt(cityWin.platformOrders)}</div></div>
       <div class="stat-card accent"><div class="label">M4O Share of Own Platform Orders</div><div class="value">${cityWin.platformOrders ? shareToPct(cityWin.m41Orders/cityWin.platformOrders) : '—'}</div></div>
-      <div class="stat-card purple"><div class="label">M4O Share of Total Platform Orders</div><div class="value">${shareToPct(cityWin.areaM4OShare)}</div></div>
-      <div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${cityWin.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(cityWin.orderedVendorCount)} vendors ordered</div></div>
+      ${cityWin.areaM4OShare !== undefined ? `<div class="stat-card purple"><div class="label">M4O Share of Total Platform Orders</div><div class="value">${shareToPct(cityWin.areaM4OShare)}</div></div>` : ''}
+      ${cityWin.ordersPerOrderedVendor !== undefined ? `<div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${cityWin.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(cityWin.orderedVendorCount)} vendors ordered</div></div>` : ''}
     </div>
+    ${cityWin.areaM4OShare === undefined ? '<div class="section-note">"M4O Share of Total Platform Orders" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
     <div class="section-title">Marketing Areas (${areas.length})</div>
     <div class="table-wrap">
       <table>
@@ -865,9 +881,9 @@ function renderOrderShareCityDrill(city){
             <td>${fmt(vendorCount)}</td>
             <td style="font-family:var(--mono)">${fmt(v.m41Orders)}</td>
             <td style="font-family:var(--mono)">${fmt(v.platformOrders)}</td>
-            <td style="font-family:var(--mono)">${v.ordersPerOrderedVendor.toFixed(1)}</td>
+            <td style="font-family:var(--mono)">${v.ordersPerOrderedVendor !== undefined ? v.ordersPerOrderedVendor.toFixed(1) : '—'}</td>
             <td style="font-family:var(--mono); color:var(--seg-b)">${cityWin.m41Orders ? shareToPct(v.m41Orders/cityWin.m41Orders) : '—'}</td>
-            <td style="font-family:var(--mono); color:var(--purple)">${shareToPct(v.areaM4OShare)}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${v.areaM4OShare !== undefined ? shareToPct(v.areaM4OShare) : '—'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -976,7 +992,7 @@ function renderKitchen(){
             const share = win==='yesterday' ? v.m4oShareYesterday : v.m4oShareMtd;
             return `<tr>
             <td>${escapeHtml(v.name)}</td>
-            <td><span class="badge seg-${v.segment}">${v.segment}</span></td>
+            <td><span class="badge seg-${escapeAttr(v.segment)}">${escapeHtml(v.segment)}</span></td>
             <td>${fmt(v.packCount)}</td>
             <td>${v.avgRate !== null ? v.avgRate.toFixed(2) : '<span class="dim">No rating</span>'}</td>
             <td style="font-family:var(--mono)">${fmt(orders)}</td>
@@ -1030,7 +1046,7 @@ function renderCoverageModel(){
         <tbody>
           ${areas.map(([area,v]) => `<tr>
             <td>${escapeHtml(area)}</td>
-            <td><span class="badge status-${v.status}">${v.status}</span></td>
+            <td><span class="badge status-${escapeAttr(v.status)}">${escapeHtml(v.status)}</span></td>
             <td style="font-family:var(--mono)">${fmt(v.totalUsers)}</td>
             <td>${fmt(v.elite.users)} <span class="dim">(${v.elite.pct}%)</span></td>
             <td>${fmt(v.healthy.users)} <span class="dim">(${v.healthy.pct}%)</span></td>
@@ -1049,7 +1065,7 @@ function coverageCityCard(city, scopes){
   const all = scopes['All Areas'];
   if(!all) return '';
   return `<div class="list-card" data-action="cm-city" data-city="${escapeAttr(city)}">
-    <div class="name">${escapeHtml(city)} ${all.status ? `<span class="badge status-${all.status}" style="margin-left:6px">${all.status}</span>` : ''}</div>
+    <div class="name">${escapeHtml(city)} ${all.status ? `<span class="badge status-${escapeAttr(all.status)}" style="margin-left:6px">${escapeHtml(all.status)}</span>` : ''}</div>
     <div class="row"><span>Total users</span><b>${fmt(all.totalUsers)}</b></div>
     <div class="row"><span>Elite</span><b style="color:${STATUS_COLORS.Elite}">${all.elite.pct}%</b></div>
     <div class="row"><span>Healthy</span><b style="color:${STATUS_COLORS.Healthy}">${all.healthy.pct}%</b></div>
@@ -1059,7 +1075,7 @@ function coverageCityCard(city, scopes){
 function coverageScopeCard(title, scope){
   if(!scope) return `<div class="chart-box"><h3>${title}</h3><div class="empty-state" style="padding:20px">No data</div></div>`;
   return `<div class="chart-box">
-    <h3>${title} ${scope.status ? `<span class="badge status-${scope.status}" style="margin-left:6px">${scope.status}</span>` : ''}</h3>
+    <h3>${escapeHtml(title)} ${scope.status ? `<span class="badge status-${escapeAttr(scope.status)}" style="margin-left:6px">${escapeHtml(scope.status)}</span>` : ''}</h3>
     <div style="font-size:12px; color:var(--text-faint); margin-bottom:14px">Total users: <b style="color:var(--text); font-family:var(--mono)">${fmt(scope.totalUsers)}</b></div>
     ${progressRow('Elite', scope.elite.pct, STATUS_COLORS.Elite)}
     ${progressRow('Healthy', scope.healthy.pct, STATUS_COLORS.Healthy)}
