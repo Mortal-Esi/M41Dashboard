@@ -1,0 +1,12 @@
+{
+  "name": "meal4one-dashboard-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Syncs Meal4One dashboard data from Google Sheets",
+  "scripts": {
+    "update": "node update_dashboard.js"
+  },
+  "dependencies": {
+    "googleapis": "^140.0.1"
+  }
+}
