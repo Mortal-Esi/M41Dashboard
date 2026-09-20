@@ -28,6 +28,14 @@ if errorlevel 1 (
 
 echo.
 echo [3/3] Pushing to GitHub Pages...
+git pull origin main --no-edit
+if errorlevel 1 (
+    echo.
+    echo [FAILED] git pull failed to merge automatically ^(likely a conflict^).
+    echo Open this folder in a git tool and resolve it manually, then push.
+    pause
+    exit /b 1
+)
 git push origin main
 if errorlevel 1 (
     echo.
