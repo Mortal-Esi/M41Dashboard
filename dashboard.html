@@ -894,7 +894,6 @@ function renderImpression(){
     </div>
     <div class="chart-box"><h3>Impressions by Time of Day (half-hour trend)</h3><canvas id="impTimeChart"></canvas></div>
     <input class="search-box" id="impPackSearch" placeholder="Filter packs by title or vendor…">
-    <div class="section-note">Pack-level order-to-impression isn't available — the Order sheet only tracks orders per vendor, not per pack.</div>
     <div class="table-wrap">
       <table id="impPackTable">
         <thead><tr><th>Pack</th><th>Vendor</th><th>Kitchen</th><th>Deal Type</th><th>Total Impressions</th></tr></thead>
@@ -979,7 +978,7 @@ function renderImpressionConversion(){
         <div class="toggle-btn ${sortKey==='conversion'?'active':''}" data-impsort="conversion">Best M4O Conversion</div>
       </div>
     </div>
-    <div class="section-note">Conversion = M4O Orders (yesterday) ÷ Total Impressions (yesterday), at vendor level — the Order sheet has no per-pack breakdown, so conversion can't go below vendor level. Platform-wide orders aren't shown here: impressions only cover the Meal4One carousel, so a platform-order ratio wouldn't mean anything. ${sortKey !== 'totalImpression' ? `Conversion rankings only include vendors with ≥ ${fmt(IMPRESSION_CONVERSION_MIN_IMPRESSIONS)} impressions (${fmt(pool.length)} of ${fmt(vendors.length)}), so a couple of stray orders on a barely-seen vendor can't fake a 500%+ "conversion rate". ` : ''}Top ${Math.min(50, sorted.length)} vendors by the selected sort, out of ${fmt(pool.length)}.</div>
+    <div class="section-note">Conversion = M4O Orders (yesterday) ÷ Total Impressions (yesterday). Platform-wide orders aren't shown here: impressions only cover the Meal4One carousel, so a platform-order ratio wouldn't mean anything. ${sortKey !== 'totalImpression' ? `Conversion rankings only include vendors with ≥ ${fmt(IMPRESSION_CONVERSION_MIN_IMPRESSIONS)} impressions (${fmt(pool.length)} of ${fmt(vendors.length)}), so a couple of stray orders on a barely-seen vendor can't fake a 500%+ "conversion rate". ` : ''}Top ${Math.min(50, sorted.length)} vendors by the selected sort, out of ${fmt(pool.length)}.</div>
     <input class="search-box" id="impConvSearch" placeholder="Filter vendors by name…">
     <div class="table-wrap">
       <table id="impConvTable">

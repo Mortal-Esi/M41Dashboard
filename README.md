@@ -196,12 +196,10 @@ is the stronger route.
   - **Impression → Order Conversion**: since impressions only cover
     the Meal4One carousel, only **M4O orders** are a meaningful
     numerator here — a platform-wide-orders ratio isn't shown at all.
-    The Order sheet has no per-pack breakdown, so conversion
-    (M4O Orders ÷ Impressions, yesterday) is computed at the
-    **vendor** level and rolled up from there by City, Marketing
+    Conversion (M4O Orders ÷ Impressions, yesterday) is computed at
+    the **vendor** level and rolled up from there by City, Marketing
     Area, and vendor segment (Kitchen / Top Critical / Critical /
-    Other) — never at the pack level, which isn't computable from the
-    source data. Vendors with fewer than 100 impressions are excluded
+    Other). Vendors with fewer than 100 impressions are excluded
     from the conversion rankings (but not from "Most Seen") — below
     that, a couple of stray orders can make a barely-seen vendor look
     like it has a 500%+ conversion rate.
