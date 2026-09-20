@@ -1,0 +1,76 @@
+name: Refresh Dashboard Data
+
+# Automated version of what refresh-dashboard.bat does locally: pull fresh
+# data from Google Sheets, encrypt it, and push dashboard_data.enc.
+#
+# Requires 4 repo Secrets (Settings -> Secrets and variables -> Actions):
+#   SERVICE_ACCOUNT_JSON     — full contents of your service-account.json
+#   DASHBOARD_PASSWORD       — the current dashboard password
+#   SPREADSHEET_ID           — main data sheet ID
+#   COVERAGE_SPREADSHEET_ID  — Coverage Model sheet ID
+#
+# Runs every 30 minutes between 11:00 and 15:00 Iran time (UTC+3:30 —
+# Iran has no DST since 2022, so this offset is fixed year-round).
+# GitHub's cron scheduler is best-effort and can run a few minutes late,
+# especially during high load — treat these as approximate times, not exact.
+
+on:
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab, for testing
+  schedule:
+    - cron: '30 7 * * *'  # 11:00 Iran time
+    - cron: '0 8 * * *'   # 11:30
+    - cron: '30 8 * * *'  # 12:00
+    - cron: '0 9 * * *'   # 12:30
+    - cron: '30 9 * * *'  # 13:00
+    - cron: '0 10 * * *'  # 13:30
+    - cron: '30 10 * * *' # 14:00
+    - cron: '0 11 * * *'  # 14:30
+    - cron: '30 11 * * *' # 15:00
+
+concurrency:
+  group: refresh-dashboard
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Write credentials (from repo Secrets — never committed)
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          DASHBOARD_PASSWORD_JS: ${{ toJSON(secrets.DASHBOARD_PASSWORD) }}
+        run: |
+          printf '%s' "$SERVICE_ACCOUNT_JSON" > service-account.json
+          printf 'module.exports = %s;\n' "$DASHBOARD_PASSWORD_JS" > password.local.js
+
+      - name: Run update_dashboard.js
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          COVERAGE_SPREADSHEET_ID: ${{ secrets.COVERAGE_SPREADSHEET_ID }}
+        run: node update_dashboard.js
+
+      - name: Commit and push if dashboard_data.enc changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dashboard_data.enc
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Automated dashboard data refresh"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
