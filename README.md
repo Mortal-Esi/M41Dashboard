@@ -15,7 +15,7 @@
 
 3. Share **both** Google Sheets with the service account's email
    (found in the `client_email` field of the key file) as **Viewer**:
-   - The main data sheet (MainData / Order / TopCritical / BI)
+   - The main data sheet (MainData / Order / TopCritical / BI / Impression)
    - The Coverage Model sheet (CityCoverage / CoverageResult)
 
 4. Open `update_dashboard.js` and set both IDs near the top —
@@ -28,20 +28,74 @@
 
 ## Every time you want to refresh the dashboard
 
+Easiest: double-click **`refresh-dashboard.bat`**. It pulls fresh data,
+encrypts it, and pushes the update to GitHub Pages automatically.
+
+Or manually:
 ```
 node update_dashboard.js
 ```
-
-This reads all six tabs across both sheets, re-runs all the
-aggregations, and overwrites `dashboard_data.json`.
+This reads all seven tabs across both sheets (MainData, Order, TopCritical, BI, Impression, CityCoverage, CoverageResult), re-runs all the aggregations,
+writes `dashboard_data.json`, and then **automatically encrypts it** into
+`dashboard_data.enc` (see Password Protection below).
 
 Then just open (or refresh) `dashboard.html` in your browser.
 
+## Password protection
+
+The live dashboard is public on GitHub Pages, so it's protected with a
+password:
+
+- `dashboard_data.json` (the plaintext data) is **never** committed to
+  git — it's listed in `.gitignore` and stays only on your computer.
+- Every time `update_dashboard.js` runs, it also encrypts that JSON
+  (AES, via `encrypt.js`) into `dashboard_data.enc`. **Only this
+  encrypted file is committed and published.**
+- `dashboard.html` fetches `dashboard_data.enc` and shows a password
+  screen. It decrypts the data in-browser only after the correct
+  password is entered — nobody can read the data via "View Source" or
+  the browser's dev tools without the password, unlike a simple
+  show/hide overlay.
+- The password itself lives in `password.local.js` — **not** in this
+  README, not in `encrypt.js`, and not anywhere else that gets
+  committed. That file is listed in `.gitignore` on purpose: the whole
+  point of encrypting the data is defeated if the password sits in
+  plain text in the same public repo as the ciphertext. Ask whoever
+  set up the dashboard for the current password out of band (chat,
+  in person, etc.), not through this file.
+- First-time setup: copy `password.local.js.example` to
+  `password.local.js` and put the real password in it:
+  ```
+  cp password.local.js.example password.local.js
+  ```
+- To change the password: edit the value in your local
+  `password.local.js`, then run `node update_dashboard.js` again (or
+  `node encrypt.js` on its own if the data hasn't changed) and push.
+  Anyone with the old password will no longer be able to unlock the
+  dashboard after you republish. Share the new password with people
+  who need it the same way you shared the old one — never by
+  committing it anywhere.
+- Once someone enters the correct password, their browser remembers it
+  for that browsing session (`sessionStorage`), so they won't be asked
+  again until they close the tab/browser.
+
+**Honest caveat:** this is meaningfully stronger than a cosmetic
+JS gate (the raw published file is genuine ciphertext, not just hidden
+HTML), but it's still a single shared password handled client-side —
+anyone who has it can share it, and a determined attacker could
+brute-force a weak password offline. Treat it as "keeps casual/unauthorized
+viewers out," not as enterprise access control. For real per-user access
+control, the earlier-discussed Cloudflare Access + Google login option
+is the stronger route.
+
 ## Filtering & calculation rules baked into the script
 
-- **Pack filter**: keep a pack if `Activity == 1`, OR if `Activity == 0`
-  AND `PO > 0` (it had a platform order yesterday despite being inactive
-  now). Everything else is dropped.
+- **Pack filter**: keep a pack if `Activity == 1`, OR `PO > 0` (it had a
+  platform order yesterday despite being inactive now), OR the pack has
+  impressions (its PackID appears in the Impression sheet — someone saw
+  it yesterday, so it isn't truly dead even if Activity/PO both read 0).
+  Everything else is dropped. This third condition rescued 143 packs in
+  the original snapshot.
 - **Marketing Area**: joined onto MainData by VendorID — first from
   the Order sheet, and for vendors not found there, from the BI sheet
   as a fallback (BI has exactly one Area per vendor, no ambiguity).
@@ -120,13 +174,79 @@ Then just open (or refresh) `dashboard.html` in your browser.
   An "All Cities" aggregate is computed on the fly (weighted by
   `total_users` across all cities, per scope) — it's not a row that
   exists in the source sheet.
+- **Impression tab**: per-pack impressions for **yesterday only** (the
+  Impression sheet has no historical/MTD window), read from the
+  `Impression` tab of the main data sheet. The 34 half-hour header
+  cells (07:00–23:30) are read by **column position**, not by header
+  name — Sheets API returns time-of-day headers as raw day-fraction
+  numbers under `UNFORMATTED_VALUE`, which aren't safe to use as
+  object keys, so the 34-slot layout is hardcoded in
+  `update_dashboard.js`. A handful of PackIDs appear twice in the
+  source sheet; those are summed. Each pack is joined to MainData by
+  PackID to pick up Deal Type, Kitchen, Segment, Top Critical and
+  Marketing Area. The dashboard groups the 34 slots into five meal
+  periods (Breakfast 07–10, Lunch 10–14, Afternoon 14–18, Dinner
+  18–22, Night 22–24) for a more readable chart.
+  - **Impression → Order Conversion**: since the Order sheet has no
+    per-pack breakdown, conversion (M4O Orders ÷ Impressions, and
+    Platform Orders ÷ Impressions) is computed at the **vendor**
+    level only, both using yesterday's numbers. Vendors with fewer
+    than 100 impressions are excluded from the conversion rankings
+    (but not from "Most Seen") — below that, a couple of stray
+    orders can make a barely-seen vendor look like it has a 500%+
+    conversion rate.
+  - Respects the Vendor Type filter like Pack Distribution; the
+    conversion table is only shown on the unfiltered (All) view.
+  - **Known open issue**: in the original snapshot, the sum of the 34
+    half-hour buckets was consistently about half of the sheet's own
+    `total_impression` column. The dashboard currently trusts
+    `total_impression` (the raw column) as the source of truth for
+    every "Total Impressions" figure; the 34-slot chart is shown as
+    the time-of-day *shape*, not guaranteed to sum to the total until
+    that discrepancy is resolved at the source. Worth asking the
+    data/BI team why the two don't match.
+
+- **CPO Budget tab**: month-to-date (Gregorian calendar month, updated
+  daily — same MTD convention as the rest of the dashboard), read
+  from the `CPO_Budget_MTD` tab. The `CPO_Budget_Aug` and
+  `CPO_Budget_sep` tabs are **not** read — their data isn't
+  considered valid. The sheet has ~1,900 fully blank trailing rows
+  (padding); only rows with a `VendorID` are kept. Only four of the
+  sheet's numeric columns are trusted: `Product_Subsidy_Budget_new`,
+  `Free_Delivery_Budget_new`, `new_total_budget` and `new_cpo`; the
+  dashboard drops the "new" from their labels (Subsidy Budget, Free
+  Delivery Budget, Total Budget, CPO).
+  - **CPO** = Total Budget ÷ M4O Orders (the sheet's own `new_cpo`).
+  - **Free Delivery CPO** = Free Delivery Budget ÷ M4O Orders.
+  - **Subsidy Cost / Sold** = Subsidy Budget ÷ `TotalSold` — product
+    subsidy is spent per sold unit, not per order, so it isn't a
+    "CPO" in the usual sense.
+  - **Kitchen is kept fully separate.** Kitchen vendors can also be
+    Critical/TopCritical/etc., so they're excluded from the By Vendor
+    Class / By Vendor Tier / By New Vendor Class breakdowns entirely
+    (folding them in would double-count them into whichever other
+    class they also carry) and shown as their own single line
+    instead. The City → Marketing Area → Vendor drill-down is
+    unaffected by this and includes Kitchen vendors normally (tagged
+    with the Kitchen badge), since that's a geography view, not a
+    segment view.
+  - The four segment axes used are `VendorClass`, `VendorTier`,
+    `Kitchen`, and `new_VendorClass`; `Decile` and `Segment` are
+    shown per-vendor in the drill-down table for context but don't
+    get their own breakdown table.
+  - Doesn't respect the Vendor Type filter (hidden on this tab, like
+    Kitchen) — it has its own segmentation already.
 
 The whole UI is English-only (including the Vendor Type filter
 labels); city and area names stay as they appear in the source data.
 
 ## Files
 
-- `update_dashboard.js` — pulls from both Google Sheets, regenerates the JSON
-- `dashboard_data.json` — the processed data the dashboard reads (regenerated each run)
+- `update_dashboard.js` — pulls from both Google Sheets, regenerates the JSON, then encrypts it
+- `dashboard_data.json` — the processed plaintext data (regenerated each run, gitignored, never committed)
+- `dashboard_data.enc` — the encrypted data actually published to GitHub Pages
+- `encrypt.js` — encrypts `dashboard_data.json` into `dashboard_data.enc`
+- `password.local.js` — the real dashboard password (you create this from the `.example` file below, gitignored, never committed)
+- `password.local.js.example` — template for `password.local.js`
 - `dashboard.html` — the dashboard itself, open this in a browser
-- `service-account.json` — your credentials (you provide this, keep it private)
+- `service-account.json` — your credentials (you provide this, keep it private, gitignored)

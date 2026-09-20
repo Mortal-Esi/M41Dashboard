@@ -1,2 +1,10 @@
-service-account.json
 node_modules/
+service-account.json
+
+# Plaintext data must NEVER be committed — only the encrypted .enc file is public.
+dashboard_data.json
+coverage_model_snapshot.json
+
+# The real dashboard password must NEVER be committed either — it lives only
+# in this local file (see password.local.js.example for the template).
+password.local.js

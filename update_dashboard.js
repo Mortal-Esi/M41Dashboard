@@ -2,7 +2,7 @@
  * Meal4One Dashboard — Sync Script
  * ---------------------------------
  * Reads two Google Sheets using a service account:
- *   1. The main data sheet — MainData, Order, TopCritical, BI tabs
+ *   1. The main data sheet — MainData, Order, TopCritical, BI, Impression tabs
  *   2. The Coverage Model sheet — CityCoverage, CoverageResult tabs
  * Applies the processing rules described in README.md, and writes
  * dashboard_data.json next to this file.
@@ -28,14 +28,16 @@ const { google } = require('googleapis');
 // CONFIG — edit these lines
 // ============================================================
 const SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'service-account.json');
-const SPREADSHEET_ID = '12qm6D-DYaWLF4yrQUf0Dtzsl8ZhBJqkKP8vSqyxzn6M'; // main data sheet (MainData/Order/TopCritical/BI)
-const COVERAGE_SPREADSHEET_ID = '1ye1HSOJlBUr8OHFNNpR3-TPjLhOpIAYCS0D04a916w0'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
+const SPREADSHEET_ID = 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/Order/TopCritical/BI)
+const COVERAGE_SPREADSHEET_ID = 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
 
 const SHEET_NAMES = {
   mainData: 'MainData',
   order: 'Order',
   topCritical: 'TopCritical',
   bi: 'BI',
+  impression: 'Impression',
+  cpoBudget: 'CPO_Budget_MTD',
 };
 
 const COVERAGE_SHEET_NAMES = {
@@ -71,6 +73,49 @@ async function fetchSheetAsObjects(sheets, spreadsheetId, sheetName) {
     headers.forEach((h, i) => { obj[h] = row[i] === undefined ? null : row[i]; });
     return obj;
   });
+}
+
+// ============================================================
+// IMPRESSION SHEET — fetched by column POSITION, not header name.
+// The 34 half-hour header cells (07:00 .. 23:30) are time-of-day values;
+// read with UNFORMATTED_VALUE they come back as raw day-fraction numbers,
+// not clean "07:00" strings, so they're unsafe to use as object keys.
+// Fixed layout: 0 City, 1 CityID, 2 VendorID, 3 Title, 4 PackID, 5 full_title,
+// 6 Activity, 7..40 the 34 half-hour buckets, 41 total_impression.
+// ============================================================
+const TIME_SLOTS = [];
+for (let h = 7; h <= 23; h++) {
+  TIME_SLOTS.push(`${String(h).padStart(2, '0')}:00`);
+  TIME_SLOTS.push(`${String(h).padStart(2, '0')}:30`);
+}
+
+const IMPRESSION_PERIODS = [
+  { key: 'breakfast', label: 'Breakfast (07–10)', range: [0, 6] },
+  { key: 'lunch', label: 'Lunch (10–14)', range: [6, 14] },
+  { key: 'afternoon', label: 'Afternoon (14–18)', range: [14, 22] },
+  { key: 'dinner', label: 'Dinner (18–22)', range: [22, 30] },
+  { key: 'night', label: 'Night (22–24)', range: [30, 34] },
+];
+
+async function fetchImpressionRows(sheets, spreadsheetId, sheetName) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: sheetName,
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+  const rows = res.data.values || [];
+  if (rows.length <= 1) return [];
+  return rows.slice(1).map((row) => ({
+    City: row[0],
+    CityID: row[1],
+    VendorID: row[2],
+    Title: row[3],
+    PackID: row[4],
+    full_title: row[5],
+    Activity: row[6],
+    bySlot: TIME_SLOTS.map((_, i) => toNum(row[7 + i], 0)),
+    total_impression: toNum(row[41], 0),
+  }));
 }
 
 // ============================================================
@@ -190,6 +235,31 @@ async function main() {
   console.log(`  TopCritical: ${topcRaw.length} rows`);
   console.log(`  BI: ${biRaw.length} rows`);
 
+  console.log('Fetching Impression…');
+  const impressionRawRows = await fetchImpressionRows(sheets, SPREADSHEET_ID, SHEET_NAMES.impression);
+  console.log(`  Impression: ${impressionRawRows.length} rows`);
+
+  console.log('Fetching CPO_Budget_MTD…');
+  const cpoBudgetRaw = await fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.cpoBudget);
+  // The sheet has ~1900 fully blank trailing rows — keep only real vendor rows.
+  const cpoRows = cpoBudgetRaw.filter((r) => r.VendorID !== null && r.VendorID !== undefined && r.VendorID !== '');
+  console.log(`  CPO_Budget_MTD: ${cpoBudgetRaw.length} rows (${cpoRows.length} real)`);
+
+  // Dedupe by PackID (a handful of packs appear twice in the source sheet) — sum both.
+  const impressionByPackId = new Map();
+  for (const r of impressionRawRows) {
+    const pid = String(r.PackID);
+    if (!impressionByPackId.has(pid)) {
+      impressionByPackId.set(pid, { ...r, bySlot: [...r.bySlot] });
+    } else {
+      const existing = impressionByPackId.get(pid);
+      existing.total_impression += r.total_impression;
+      for (let i = 0; i < r.bySlot.length; i++) existing.bySlot[i] += r.bySlot[i];
+    }
+  }
+  const impressionRows = [...impressionByPackId.values()];
+  const impressionPackIds = new Set(impressionRows.map((r) => String(r.PackID)));
+
   console.log('Fetching CityCoverage, CoverageResult (Coverage Model sheet)…');
   const [cityCoverageRaw, coverageResultRaw] = await Promise.all([
     fetchSheetAsObjects(sheets, COVERAGE_SPREADSHEET_ID, COVERAGE_SHEET_NAMES.cityCoverage),
@@ -198,11 +268,14 @@ async function main() {
   console.log(`  CityCoverage: ${cityCoverageRaw.length} rows`);
   console.log(`  CoverageResult: ${coverageResultRaw.length} rows`);
 
-  // ---- FILTER RULE: Activity==1, OR (Activity==0 AND PO>0) ----
+  // ---- FILTER RULE: Activity==1, OR PO>0, OR the pack has impressions ----
+  // (Activity==0/PO==0 packs that still got impressions were seen by users —
+  // not truly dead — so they're rescued into the dataset. See README.)
   const df = mainRaw.filter((r) => {
     const activity = toNum(r.Activity, 0);
     const po = toNum(r.PO, 0);
-    return activity === 1 || (activity === 0 && po > 0);
+    const hasImpression = impressionPackIds.has(String(r.PackID));
+    return activity === 1 || po > 0 || hasImpression;
   });
   console.log(`  MainData after filter: ${df.length} rows`);
 
@@ -400,10 +473,13 @@ async function main() {
     const plat = rows.reduce((s, r) => s + toNum(r.VPFO, 0), 0);
     const shares = rows.map((r) => toNum(r.M41_V_OS, null)).filter((v) => v !== null);
     const marketShares = rows.map((r) => toNum(r.V_Pl_OS, null)).filter((v) => v !== null);
+    const orderedVendorCount = new Set(rows.filter((r) => toNum(r.M41VO, 0) > 0).map((r) => r.VendorID)).size;
     return {
       m41Orders: m41, platformOrders: plat,
       avgVendorM41Share: shares.length ? shares.reduce((a, b) => a + b, 0) / shares.length : 0,
       avgVendorMarketShare: marketShares.length ? marketShares.reduce((a, b) => a + b, 0) / marketShares.length : 0,
+      orderedVendorCount,
+      ordersPerOrderedVendor: orderedVendorCount ? m41 / orderedVendorCount : 0,
     };
   }
   function windowStatsMtd(rows) {
@@ -411,10 +487,13 @@ async function main() {
     const plat = rows.reduce((s, r) => s + toNum(r.NewMonthVPFO, 0), 0);
     const shares = rows.map((r) => toNum(r.NewMonth_M41_V_OS, null)).filter((v) => v !== null);
     const marketShares = rows.map((r) => toNum(r.NewMonth_V_Pl_OS, null)).filter((v) => v !== null);
+    const orderedVendorCount = new Set(rows.filter((r) => toNum(r.NewMonthM41VO, 0) > 0).map((r) => r.VendorID)).size;
     return {
       m41Orders: m41, platformOrders: plat,
       avgVendorM41Share: shares.length ? shares.reduce((a, b) => a + b, 0) / shares.length : 0,
       avgVendorMarketShare: marketShares.length ? marketShares.reduce((a, b) => a + b, 0) / marketShares.length : 0,
+      orderedVendorCount,
+      ordersPerOrderedVendor: orderedVendorCount ? m41 / orderedVendorCount : 0,
     };
   }
 
@@ -591,7 +670,42 @@ async function main() {
   kitchenOverall.shareOfAllM4OYesterday = totalM41Y ? kitchenOverall.ordersYesterday / totalM41Y : 0;
   kitchenOverall.shareOfAllM4OMtd = totalM41Mtd ? kitchenOverall.ordersMtd / totalM41Mtd : 0;
 
-  const kitchenModule = { overall: kitchenOverall, byCity: kitchenCityBlocks };
+  // ---- Non-Kitchen comparison block (same shape as kitchenOverall) ----
+  const nonKitchenPacks = df.filter((r) => !r._IsKitchen);
+  const nonKitchenVendorSeen = new Map();
+  for (const r of nonKitchenPacks) {
+    if (!nonKitchenVendorSeen.has(r.VendorID)) nonKitchenVendorSeen.set(r.VendorID, r);
+  }
+  const nonKitchenVendorRows = [...nonKitchenVendorSeen.values()];
+  const nonKitchenVendors = nonKitchenVendorRows.map((v) => {
+    const orderRow = orderRowByVendor.get(String(v.VendorID));
+    return {
+      ordersYesterday: orderRow ? toNum(orderRow.M41VO, 0) : 0,
+      ordersMtd: orderRow ? toNum(orderRow.NewMonthM41VO, 0) : 0,
+      platformOrdersYesterday: orderRow ? toNum(orderRow.VPFO, 0) : 0,
+      platformOrdersMtd: orderRow ? toNum(orderRow.NewMonthVPFO, 0) : 0,
+    };
+  });
+  const nonKitchenRatedPacks = nonKitchenPacks.filter((r) => r._RateBucket !== null);
+  const nonKitchenOverall = {
+    vendorCount: nonKitchenVendorRows.length,
+    packCount: nonKitchenPacks.length,
+    avgRate: nonKitchenRatedPacks.length ? Math.round((nonKitchenRatedPacks.reduce((s, r) => s + toNum(r.Rate, 0), 0) / nonKitchenRatedPacks.length) * 100) / 100 : 0,
+    ratedPackCount: nonKitchenRatedPacks.length,
+    ordersYesterday: nonKitchenVendors.reduce((s, v) => s + v.ordersYesterday, 0),
+    ordersMtd: nonKitchenVendors.reduce((s, v) => s + v.ordersMtd, 0),
+    platformOrdersYesterday: nonKitchenVendors.reduce((s, v) => s + v.platformOrdersYesterday, 0),
+    platformOrdersMtd: nonKitchenVendors.reduce((s, v) => s + v.platformOrdersMtd, 0),
+  };
+  nonKitchenOverall.m4oShareYesterday = nonKitchenOverall.platformOrdersYesterday ? nonKitchenOverall.ordersYesterday / nonKitchenOverall.platformOrdersYesterday : 0;
+  nonKitchenOverall.m4oShareMtd = nonKitchenOverall.platformOrdersMtd ? nonKitchenOverall.ordersMtd / nonKitchenOverall.platformOrdersMtd : 0;
+  nonKitchenOverall.shareOfAllM4OYesterday = totalM41Y ? nonKitchenOverall.ordersYesterday / totalM41Y : 0;
+  nonKitchenOverall.shareOfAllM4OMtd = totalM41Mtd ? nonKitchenOverall.ordersMtd / totalM41Mtd : 0;
+  // avg discount (Kitchen packs are always excluded from this metric anyway — here it's just the non-Kitchen average, same number as packDistribution.avgSnappDiscountToman)
+  nonKitchenOverall.avgSnappDiscountToman = avgDiscountKitchenOnly(nonKitchenPacks);
+  kitchenOverall.avgSnappDiscountToman = null; // not meaningful for Kitchen packs at this scale — see README
+
+  const kitchenModule = { overall: kitchenOverall, nonKitchenOverall, byCity: kitchenCityBlocks };
 
   // ============================================================
   // MODULE 6: COVERAGE MODEL (live from the Coverage_Radius sheet, + All Cities aggregate)
@@ -662,6 +776,188 @@ async function main() {
   console.log(`  Coverage Model processed (${Object.keys(cityCoverage).length} cities incl. "All Cities")`);
 
   // ============================================================
+  // MODULE 7: IMPRESSION (yesterday, per pack, half-hour buckets)
+  // ============================================================
+  const mainByPackId = new Map();
+  for (const r of df) mainByPackId.set(String(r.PackID), r);
+
+  const impressionPacks = impressionRows.map((r) => {
+    const main = mainByPackId.get(String(r.PackID));
+    return {
+      packId: r.PackID,
+      title: main ? main.full_title : r.full_title,
+      vendorId: r.VendorID,
+      vendorName: main ? main.Title : r.Title,
+      city: r.City,
+      area: main ? main._MarketingAreaName : 'Unknown',
+      dealType: main ? (main.DealType || 'Unknown') : 'Unknown',
+      kitchen: main ? !!main._IsKitchen : false,
+      segment: main ? (main.VendorTier || 'Unknown') : 'Unknown',
+      topCritical: main ? !!main._IsTopCritical : false,
+      superTypeId: main ? toNum(main.SuperTypeID, null) : null,
+      total: r.total_impression,
+      bySlot: r.bySlot,
+    };
+  });
+
+  function impressionAgg(packs) {
+    const total = packs.reduce((s, p) => s + p.total, 0);
+    const bySlot = new Array(34).fill(0);
+    packs.forEach((p) => p.bySlot.forEach((v, i) => { bySlot[i] += v; }));
+    const byPeriod = {};
+    IMPRESSION_PERIODS.forEach((per) => {
+      byPeriod[per.key] = bySlot.slice(per.range[0], per.range[1]).reduce((a, b) => a + b, 0);
+    });
+    const vendorCount = new Set(packs.map((p) => p.vendorId)).size;
+    const kitchenTotal = packs.filter((p) => p.kitchen).reduce((s, p) => s + p.total, 0);
+    const segATotal = packs.filter((p) => p.segment === 'A').reduce((s, p) => s + p.total, 0);
+    const segBTotal = packs.filter((p) => p.segment === 'B').reduce((s, p) => s + p.total, 0);
+    const dealTypeTotals = {};
+    const dealTypePcts = {};
+    DEAL_TYPES.forEach((dt) => {
+      const t = packs.filter((p) => p.dealType === dt).reduce((s, p) => s + p.total, 0);
+      dealTypeTotals[dt] = t;
+      dealTypePcts[dt] = pct(t, total);
+    });
+    return {
+      total, packCount: packs.length, vendorCount,
+      avgPerPack: packs.length ? Math.round(total / packs.length) : 0,
+      bySlot, byPeriod,
+      kitchenTotal, kitchenTotal_pct: pct(kitchenTotal, total),
+      nonKitchenTotal: total - kitchenTotal, nonKitchenTotal_pct: pct(total - kitchenTotal, total),
+      segATotal, segATotal_pct: pct(segATotal, total),
+      segBTotal, segBTotal_pct: pct(segBTotal, total),
+      dealTypeTotals, dealTypePcts,
+    };
+  }
+
+  const impressionByCity = {};
+  const byCityImp = groupBy(impressionPacks, (p) => p.city);
+  for (const [city, cPacks] of byCityImp) {
+    const areas = {};
+    const byAreaImp = groupBy(cPacks, (p) => p.area);
+    for (const [area, aPacks] of byAreaImp) {
+      areas[area] = { ...impressionAgg(aPacks), packs: aPacks };
+    }
+    impressionByCity[city] = { ...impressionAgg(cPacks), areas };
+  }
+  const overallImpression = impressionAgg(impressionPacks);
+
+  // ---- Vendor-level Impression → Order conversion (Order sheet has no per-pack orders) ----
+  const impByVendor = groupBy(impressionPacks, (p) => p.vendorId);
+  const conversionVendors = [...impByVendor.entries()].map(([vendorId, vPacks]) => {
+    const totalImpression = vPacks.reduce((s, p) => s + p.total, 0);
+    const orderRow = orderRowByVendor.get(String(vendorId));
+    const ordersYesterday = orderRow ? toNum(orderRow.M41VO, 0) : 0;
+    const platformOrdersYesterday = orderRow ? toNum(orderRow.VPFO, 0) : 0;
+    return {
+      id: vendorId,
+      name: vPacks[0].vendorName,
+      city: vPacks[0].city,
+      area: vPacks[0].area,
+      segment: vPacks[0].segment,
+      kitchen: vPacks.some((p) => p.kitchen),
+      topCritical: vPacks.some((p) => p.topCritical),
+      packCount: vPacks.length,
+      totalImpression,
+      ordersYesterday,
+      platformOrdersYesterday,
+      conversion: totalImpression ? ordersYesterday / totalImpression : null,
+      platformConversion: totalImpression ? platformOrdersYesterday / totalImpression : null,
+    };
+  }).sort((a, b) => b.totalImpression - a.totalImpression);
+
+  const impressionModule = {
+    timeSlots: TIME_SLOTS,
+    periods: IMPRESSION_PERIODS,
+    overall: overallImpression,
+    byCity: impressionByCity,
+    conversion: { vendors: conversionVendors },
+  };
+  console.log(`  Impression processed: ${impressionPacks.length} packs, ${overallImpression.total} total impressions`);
+
+  // ============================================================
+  // MODULE 8: CPO BUDGET (month-to-date, Gregorian month, updated daily)
+  // ============================================================
+  const cpoVendors = cpoRows.map((r) => ({
+    id: r.VendorID,
+    name: r.VendorTitle,
+    city: r.City,
+    area: r.MarketingAreaName,
+    vendorClass: r.VendorClass || 'Unknown',
+    vendorTier: r.VendorTier || 'Unknown',
+    newVendorClass: r.new_VendorClass || 'Unknown',
+    kitchen: toNum(r.Kitchen, 0) === 1,
+    decile: toNum(r.Decile, null),
+    segment: r.Segment || 'Unknown',
+    subsidyBudget: toNum(r.Product_Subsidy_Budget_new, 0),
+    freeDeliveryBudget: toNum(r.Free_Delivery_Budget_new, 0),
+    totalBudget: toNum(r.new_total_budget, 0),
+    m4oOrders: toNum(r.M41_Orders, 0),
+    totalSold: toNum(r.TotalSold, 0),
+  }));
+
+  function cpoMetrics(rows) {
+    const subsidyBudget = rows.reduce((s, r) => s + r.subsidyBudget, 0);
+    const freeDeliveryBudget = rows.reduce((s, r) => s + r.freeDeliveryBudget, 0);
+    const totalBudget = rows.reduce((s, r) => s + r.totalBudget, 0);
+    const m4oOrders = rows.reduce((s, r) => s + r.m4oOrders, 0);
+    const totalSold = rows.reduce((s, r) => s + r.totalSold, 0);
+    return {
+      vendorCount: rows.length,
+      subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
+      cpo: m4oOrders ? totalBudget / m4oOrders : null,
+      freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
+      subsidyCps: totalSold ? subsidyBudget / totalSold : null,
+    };
+  }
+  function vendorCpoFields(v) {
+    return {
+      cpo: v.m4oOrders ? v.totalBudget / v.m4oOrders : null,
+      freeDeliveryCpo: v.m4oOrders ? v.freeDeliveryBudget / v.m4oOrders : null,
+      subsidyCps: v.totalSold ? v.subsidyBudget / v.totalSold : null,
+    };
+  }
+  function breakdownBy(rows, keyFn) {
+    const groups = groupBy(rows, keyFn);
+    const out = {};
+    for (const [k, rs] of groups) out[k] = cpoMetrics(rs);
+    return out;
+  }
+
+  const nonKitchenCpoVendors = cpoVendors.filter((v) => !v.kitchen);
+  const kitchenCpoVendors = cpoVendors.filter((v) => v.kitchen);
+
+  const cpoByCity = {};
+  const byCityCpo = groupBy(cpoVendors, (v) => v.city);
+  for (const [city, cVendors] of byCityCpo) {
+    const areas = {};
+    const byAreaCpo = groupBy(cVendors, (v) => v.area);
+    for (const [area, aVendors] of byAreaCpo) {
+      areas[area] = {
+        ...cpoMetrics(aVendors),
+        vendors: aVendors.map((v) => ({ ...v, ...vendorCpoFields(v) })),
+      };
+    }
+    cpoByCity[city] = { ...cpoMetrics(cVendors), areas };
+  }
+
+  const cpoBudgetModule = {
+    overall: {
+      all: cpoMetrics(cpoVendors),
+      nonKitchen: {
+        total: cpoMetrics(nonKitchenCpoVendors),
+        byVendorClass: breakdownBy(nonKitchenCpoVendors, (v) => v.vendorClass),
+        byVendorTier: breakdownBy(nonKitchenCpoVendors, (v) => v.vendorTier),
+        byNewVendorClass: breakdownBy(nonKitchenCpoVendors, (v) => v.newVendorClass),
+      },
+      kitchen: { total: cpoMetrics(kitchenCpoVendors) },
+    },
+    byCity: cpoByCity,
+  };
+  console.log(`  CPO Budget processed: ${cpoVendors.length} vendors, total budget ${Math.round(cpoBudgetModule.overall.all.totalBudget)} T`);
+
+  // ============================================================
   // ASSEMBLE + WRITE
   // ============================================================
   const output = {
@@ -685,6 +981,8 @@ async function main() {
     topCriticalEngagement,
     kitchen: kitchenModule,
     coverageModel,
+    impression: impressionModule,
+    cpoBudget: cpoBudgetModule,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');
@@ -692,6 +990,13 @@ async function main() {
   console.log(`  Vendors: ${output.meta.totalVendorsFiltered}, Packs: ${output.meta.totalPacksFiltered}, Cities: ${output.meta.cities.length}`);
   console.log(`  SuperTypeIDs: ${superTypeIds.join(', ')}`);
   console.log(`  Top Critical engagement: ${topCriticalEngagement.numerator}/${topCriticalEngagement.denominator} (${(topCriticalEngagement.rate * 100).toFixed(1)}%)`);
+
+  // Encrypt the freshly-written JSON into dashboard_data.enc.
+  // Only the .enc file should ever be committed/pushed — the plaintext
+  // dashboard_data.json stays local (see .gitignore).
+  const { encryptDashboardData } = require('./encrypt');
+  encryptDashboardData();
+
   console.log('\nOpen dashboard.html in your browser to view the updated dashboard.');
 }
 
