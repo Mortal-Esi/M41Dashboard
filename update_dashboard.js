@@ -89,14 +89,6 @@ for (let h = 7; h <= 23; h++) {
   TIME_SLOTS.push(`${String(h).padStart(2, '0')}:30`);
 }
 
-const IMPRESSION_PERIODS = [
-  { key: 'breakfast', label: 'Breakfast (07–10)', range: [0, 6] },
-  { key: 'lunch', label: 'Lunch (10–14)', range: [6, 14] },
-  { key: 'afternoon', label: 'Afternoon (14–18)', range: [14, 22] },
-  { key: 'dinner', label: 'Dinner (18–22)', range: [22, 30] },
-  { key: 'night', label: 'Night (22–24)', range: [30, 34] },
-];
-
 async function fetchImpressionRows(sheets, spreadsheetId, sheetName) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
@@ -176,6 +168,15 @@ function avgDiscountKitchenOnly(rows) {
   return Math.round(k0.reduce((s, r) => s + r._SnappDiscountToman, 0) / k0.length);
 }
 
+// Shared 3-bucket segmentation for Non-Kitchen vendors, used by both the
+// Impression and CPO Budget modules: TopCritical, Critical, and Other
+// (Important + Ordinary + anything uncategorized).
+function vendorSegmentClass(vendorClass) {
+  if (vendorClass === 'TopCritical') return 'TopCritical';
+  if (vendorClass === 'Critical') return 'Critical';
+  return 'Other';
+}
+
 function vendorStatsBlock(rows) {
   const total = rows.length;
   const segA = rows.filter((r) => r.VendorTier === 'A').length;
@@ -206,6 +207,11 @@ function packStatsBlock(rows) {
   const discSub = rows.filter((r) => r._IsDiscountSubsidy).length;
   const coupSub = rows.filter((r) => r._IsCouponSubsidy).length;
   const kitchen = rows.filter((r) => r._IsKitchen).length;
+  // Availability: of the packs that are Activity==1 right now, what share were
+  // actually shown to a user at least once (i.e. picked up an impression)?
+  // A low number here means "marked active" isn't the same as "actually surfaced".
+  const activeRows = rows.filter((r) => r._IsActive);
+  const activeWithImpression = activeRows.filter((r) => r._HasImpression).length;
   return {
     total,
     dealTypeCounts, dealTypePcts,
@@ -213,6 +219,8 @@ function packStatsBlock(rows) {
     discountSubsidy: discSub, discountSubsidy_pct: pct(discSub, total),
     couponSubsidy: coupSub, couponSubsidy_pct: pct(coupSub, total),
     avgSnappDiscountToman: avgDiscountKitchenOnly(rows),
+    activePackCount: activeRows.length,
+    availability_pct: pct(activeWithImpression, activeRows.length),
   };
 }
 
@@ -243,6 +251,9 @@ async function main() {
   const cpoBudgetRaw = await fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.cpoBudget);
   // The sheet has ~1900 fully blank trailing rows — keep only real vendor rows.
   const cpoRows = cpoBudgetRaw.filter((r) => r.VendorID !== null && r.VendorID !== undefined && r.VendorID !== '');
+  // Built early so MODULE 7 (Impression) can also segment vendors by
+  // TopCritical / Critical / Other, the same categorization CPO Budget uses.
+  const vendorClassByVendorId = new Map(cpoRows.map((r) => [String(r.VendorID), r.VendorClass || 'Unknown']));
   console.log(`  CPO_Budget_MTD: ${cpoBudgetRaw.length} rows (${cpoRows.length} real)`);
 
   // Dedupe by PackID (a handful of packs appear twice in the source sheet) — sum both.
@@ -271,11 +282,13 @@ async function main() {
   // ---- FILTER RULE: Activity==1, OR PO>0, OR the pack has impressions ----
   // (Activity==0/PO==0 packs that still got impressions were seen by users —
   // not truly dead — so they're rescued into the dataset. See README.)
+  for (const r of mainRaw) {
+    r._IsActive = toNum(r.Activity, 0) === 1;
+    r._HasImpression = impressionPackIds.has(String(r.PackID));
+  }
   const df = mainRaw.filter((r) => {
-    const activity = toNum(r.Activity, 0);
     const po = toNum(r.PO, 0);
-    const hasImpression = impressionPackIds.has(String(r.PackID));
-    return activity === 1 || po > 0 || hasImpression;
+    return r._IsActive || po > 0 || r._HasImpression;
   });
   console.log(`  MainData after filter: ${df.length} rows`);
 
@@ -419,6 +432,8 @@ async function main() {
         price: toNum(p.price, 0),
         snappDiscountToman: Math.round(p._SnappDiscountToman),
         superTypeId: toNum(p.SuperTypeID, null),
+        isActive: p._IsActive,
+        hasImpression: p._HasImpression,
       }));
       areas[area] = { ...packStatsBlock(aRows), packs };
     }
@@ -781,6 +796,8 @@ async function main() {
   const mainByPackId = new Map();
   for (const r of df) mainByPackId.set(String(r.PackID), r);
 
+  // Only packs that actually picked up at least one impression count as
+  // "seen" — a sheet row with total_impression==0 isn't a pack a user saw.
   const impressionPacks = impressionRows.map((r) => {
     const main = mainByPackId.get(String(r.PackID));
     return {
@@ -794,20 +811,17 @@ async function main() {
       kitchen: main ? !!main._IsKitchen : false,
       segment: main ? (main.VendorTier || 'Unknown') : 'Unknown',
       topCritical: main ? !!main._IsTopCritical : false,
+      vendorClass: vendorClassByVendorId.get(String(r.VendorID)) || 'Unknown',
       superTypeId: main ? toNum(main.SuperTypeID, null) : null,
       total: r.total_impression,
       bySlot: r.bySlot,
     };
-  });
+  }).filter((p) => p.total > 0);
 
   function impressionAgg(packs) {
     const total = packs.reduce((s, p) => s + p.total, 0);
     const bySlot = new Array(34).fill(0);
     packs.forEach((p) => p.bySlot.forEach((v, i) => { bySlot[i] += v; }));
-    const byPeriod = {};
-    IMPRESSION_PERIODS.forEach((per) => {
-      byPeriod[per.key] = bySlot.slice(per.range[0], per.range[1]).reduce((a, b) => a + b, 0);
-    });
     const vendorCount = new Set(packs.map((p) => p.vendorId)).size;
     const kitchenTotal = packs.filter((p) => p.kitchen).reduce((s, p) => s + p.total, 0);
     const segATotal = packs.filter((p) => p.segment === 'A').reduce((s, p) => s + p.total, 0);
@@ -822,7 +836,7 @@ async function main() {
     return {
       total, packCount: packs.length, vendorCount,
       avgPerPack: packs.length ? Math.round(total / packs.length) : 0,
-      bySlot, byPeriod,
+      bySlot,
       kitchenTotal, kitchenTotal_pct: pct(kitchenTotal, total),
       nonKitchenTotal: total - kitchenTotal, nonKitchenTotal_pct: pct(total - kitchenTotal, total),
       segATotal, segATotal_pct: pct(segATotal, total),
@@ -843,13 +857,15 @@ async function main() {
   }
   const overallImpression = impressionAgg(impressionPacks);
 
-  // ---- Vendor-level Impression → Order conversion (Order sheet has no per-pack orders) ----
+  // ---- Vendor-level Impression → M4O Order conversion ----
+  // Impressions only cover the Meal4One carousel, so only M4O orders (not
+  // total platform orders) are a meaningful numerator here. The Order sheet
+  // has no per-pack order breakdown, so conversion can't go below vendor level.
   const impByVendor = groupBy(impressionPacks, (p) => p.vendorId);
   const conversionVendors = [...impByVendor.entries()].map(([vendorId, vPacks]) => {
     const totalImpression = vPacks.reduce((s, p) => s + p.total, 0);
     const orderRow = orderRowByVendor.get(String(vendorId));
     const ordersYesterday = orderRow ? toNum(orderRow.M41VO, 0) : 0;
-    const platformOrdersYesterday = orderRow ? toNum(orderRow.VPFO, 0) : 0;
     return {
       id: vendorId,
       name: vPacks[0].vendorName,
@@ -858,21 +874,46 @@ async function main() {
       segment: vPacks[0].segment,
       kitchen: vPacks.some((p) => p.kitchen),
       topCritical: vPacks.some((p) => p.topCritical),
+      vendorClass: vPacks[0].vendorClass,
       packCount: vPacks.length,
       totalImpression,
       ordersYesterday,
-      platformOrdersYesterday,
       conversion: totalImpression ? ordersYesterday / totalImpression : null,
-      platformConversion: totalImpression ? platformOrdersYesterday / totalImpression : null,
     };
   }).sort((a, b) => b.totalImpression - a.totalImpression);
 
+  // ---- Order-to-Impression conversion rolled up by geography & vendor segment ----
+  function conversionAgg(vendors) {
+    const totalImpression = vendors.reduce((s, v) => s + v.totalImpression, 0);
+    const ordersYesterday = vendors.reduce((s, v) => s + v.ordersYesterday, 0);
+    return {
+      vendorCount: vendors.length,
+      totalImpression, ordersYesterday,
+      conversion: totalImpression ? ordersYesterday / totalImpression : null,
+    };
+  }
+  const conversionByCity = {};
+  for (const [city, vs] of groupBy(conversionVendors, (v) => v.city)) conversionByCity[city] = conversionAgg(vs);
+  const conversionByArea = {};
+  for (const [, vs] of groupBy(conversionVendors, (v) => `${v.city}|${v.area}`)) {
+    conversionByArea[vs[0].city] = conversionByArea[vs[0].city] || {};
+    conversionByArea[vs[0].city][vs[0].area] = conversionAgg(vs);
+  }
+  const conversionBySegment = { Kitchen: conversionAgg(conversionVendors.filter((v) => v.kitchen)) };
+  for (const [seg, vs] of groupBy(conversionVendors.filter((v) => !v.kitchen), (v) => vendorSegmentClass(v.vendorClass))) {
+    conversionBySegment[seg] = conversionAgg(vs);
+  }
+
   const impressionModule = {
     timeSlots: TIME_SLOTS,
-    periods: IMPRESSION_PERIODS,
     overall: overallImpression,
     byCity: impressionByCity,
-    conversion: { vendors: conversionVendors },
+    conversion: {
+      vendors: conversionVendors,
+      byCity: conversionByCity,
+      byArea: conversionByArea,
+      bySegment: conversionBySegment,
+    },
   };
   console.log(`  Impression processed: ${impressionPacks.length} packs, ${overallImpression.total} total impressions`);
 
@@ -897,15 +938,23 @@ async function main() {
     totalSold: toNum(r.TotalSold, 0),
   }));
 
-  function cpoMetrics(rows) {
+  // Every budget figure also carries its % of the project-wide grand total for
+  // that same metric (totalBudget_pct, subsidyBudget_pct, freeDeliveryBudget_pct)
+  // — a raw Toman number alone doesn't say whether a city/segment is 2% or 40%
+  // of spend, so refs (the grand totals) are threaded through every breakdown.
+  function cpoMetrics(rows, refs) {
     const subsidyBudget = rows.reduce((s, r) => s + r.subsidyBudget, 0);
     const freeDeliveryBudget = rows.reduce((s, r) => s + r.freeDeliveryBudget, 0);
     const totalBudget = rows.reduce((s, r) => s + r.totalBudget, 0);
     const m4oOrders = rows.reduce((s, r) => s + r.m4oOrders, 0);
     const totalSold = rows.reduce((s, r) => s + r.totalSold, 0);
+    const ref = refs || { totalBudget, subsidyBudget, freeDeliveryBudget };
     return {
       vendorCount: rows.length,
       subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
+      subsidyBudget_pct: pct(subsidyBudget, ref.subsidyBudget),
+      freeDeliveryBudget_pct: pct(freeDeliveryBudget, ref.freeDeliveryBudget),
+      totalBudget_pct: pct(totalBudget, ref.totalBudget),
       cpo: m4oOrders ? totalBudget / m4oOrders : null,
       freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
       subsidyCps: totalSold ? subsidyBudget / totalSold : null,
@@ -918,12 +967,8 @@ async function main() {
       subsidyCps: v.totalSold ? v.subsidyBudget / v.totalSold : null,
     };
   }
-  function breakdownBy(rows, keyFn) {
-    const groups = groupBy(rows, keyFn);
-    const out = {};
-    for (const [k, rs] of groups) out[k] = cpoMetrics(rs);
-    return out;
-  }
+  const grandTotalRefs = cpoMetrics(cpoVendors); // self-referential: 100% of itself
+  const cpoRefs = { totalBudget: grandTotalRefs.totalBudget, subsidyBudget: grandTotalRefs.subsidyBudget, freeDeliveryBudget: grandTotalRefs.freeDeliveryBudget };
 
   const nonKitchenCpoVendors = cpoVendors.filter((v) => !v.kitchen);
   const kitchenCpoVendors = cpoVendors.filter((v) => v.kitchen);
@@ -935,23 +980,26 @@ async function main() {
     const byAreaCpo = groupBy(cVendors, (v) => v.area);
     for (const [area, aVendors] of byAreaCpo) {
       areas[area] = {
-        ...cpoMetrics(aVendors),
+        ...cpoMetrics(aVendors, cpoRefs),
         vendors: aVendors.map((v) => ({ ...v, ...vendorCpoFields(v) })),
       };
     }
-    cpoByCity[city] = { ...cpoMetrics(cVendors), areas };
+    cpoByCity[city] = { ...cpoMetrics(cVendors, cpoRefs), areas };
+  }
+
+  const nonKitchenBySegment = {};
+  for (const [seg, rows] of groupBy(nonKitchenCpoVendors, (v) => vendorSegmentClass(v.vendorClass))) {
+    nonKitchenBySegment[seg] = cpoMetrics(rows, cpoRefs);
   }
 
   const cpoBudgetModule = {
     overall: {
-      all: cpoMetrics(cpoVendors),
+      all: grandTotalRefs,
       nonKitchen: {
-        total: cpoMetrics(nonKitchenCpoVendors),
-        byVendorClass: breakdownBy(nonKitchenCpoVendors, (v) => v.vendorClass),
-        byVendorTier: breakdownBy(nonKitchenCpoVendors, (v) => v.vendorTier),
-        byNewVendorClass: breakdownBy(nonKitchenCpoVendors, (v) => v.newVendorClass),
+        total: cpoMetrics(nonKitchenCpoVendors, cpoRefs),
+        bySegment: nonKitchenBySegment,
       },
-      kitchen: { total: cpoMetrics(kitchenCpoVendors) },
+      kitchen: { total: cpoMetrics(kitchenCpoVendors, cpoRefs) },
     },
     byCity: cpoByCity,
   };
