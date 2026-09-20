@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Meal4One Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./crypto-js.min.js"></script>
 <style>
   :root{
     --bg: #0E1116;
@@ -112,6 +113,10 @@
   .badge.status-Healthy{ background:rgba(76,140,255,.14); color:var(--seg-b); }
   .badge.status-Moderate{ background:rgba(242,184,75,.14); color:var(--warn); }
   .badge.status-Low{ background:rgba(228,90,90,.14); color:var(--deal-weak); }
+  .badge.vc-TopCritical{ background:rgba(255,90,54,.16); color:var(--accent); }
+  .badge.vc-Critical{ background:rgba(242,184,75,.14); color:var(--warn); }
+  .badge.vc-Important{ background:rgba(76,140,255,.14); color:var(--seg-b); }
+  .badge.vc-Ordinary, .badge.vc-Unknown{ background:rgba(74,82,102,.3); color:var(--text-faint); }
   .dim{ color:var(--text-faint); }
 
   .section-title{ font-size:13px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em; margin:32px 0 14px; }
@@ -152,9 +157,32 @@
   ::-webkit-scrollbar{ width:10px; height:10px; }
   ::-webkit-scrollbar-track{ background:var(--bg); }
   ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:5px; }
+
+  #lockScreen{ position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:1000; }
+  .lock-box{ width:320px; max-width:88vw; text-align:center; }
+  .lock-box .lock-title{ font-size:19px; font-weight:600; margin-bottom:6px; }
+  .lock-box .lock-title span{ color:var(--accent); }
+  .lock-box .lock-sub{ font-size:12.5px; color:var(--text-dim); margin-bottom:22px; }
+  .lock-box input{ width:100%; box-sizing:border-box; padding:11px 14px; font-size:14px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:var(--mono); outline:none; transition:border-color .12s; }
+  .lock-box input:focus{ border-color:var(--accent); }
+  .lock-box button{ width:100%; margin-top:10px; padding:11px 14px; font-size:14px; font-weight:600; background:var(--accent); border:none; border-radius:var(--radius); color:#fff; cursor:pointer; transition:opacity .12s; }
+  .lock-box button:hover{ opacity:.88; }
+  .lock-box button:disabled{ opacity:.5; cursor:default; }
+  .lock-box .lock-error{ margin-top:12px; font-size:12.5px; color:var(--deal-weak); min-height:16px; }
+  body.locked{ overflow:hidden; }
 </style>
 </head>
-<body>
+<body class="locked">
+
+<div id="lockScreen">
+  <div class="lock-box">
+    <div class="lock-title">Meal4One <span>Dashboard</span></div>
+    <div class="lock-sub">Enter the password to view this dashboard</div>
+    <input type="password" id="lockPassword" placeholder="Password" autocomplete="off" />
+    <button id="lockSubmit">Unlock</button>
+    <div class="lock-error" id="lockError"></div>
+  </div>
+</div>
 
 <div class="header">
   <div class="title">Meal4One <span>Dashboard</span></div>
@@ -165,9 +193,11 @@
 <div class="tabs" id="tabs">
   <div class="tab active" data-panel="vendorCoverage">Vendor Coverage</div>
   <div class="tab" data-panel="packDistribution">Pack Distribution</div>
+  <div class="tab" data-panel="impression">Impression</div>
   <div class="tab" data-panel="rating">Rating</div>
   <div class="tab" data-panel="orderShare">Order Share &amp; Engagement</div>
   <div class="tab" data-panel="kitchen">Kitchen</div>
+  <div class="tab" data-panel="cpoBudget">CPO Budget</div>
   <div class="tab" data-panel="coverageModel">Coverage Model</div>
 </div>
 
@@ -183,7 +213,8 @@
    ============================================================ */
 let DATA = null;
 let currentPanel = 'vendorCoverage';
-let drill = { vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null} };
+let drill = { vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null} };
+let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion' | 'platformConversion'
 let orderWindow = 'mtd';
 let superTypeFilter = 'all'; // 'all' or a group key from SUPER_TYPE_GROUPS
 const charts = {};
@@ -193,6 +224,7 @@ const DEAL_TYPES = ['Super','Good','Basic','Weak','Not Food'];
 const DEAL_COLORS = { Super:'#3DDC97', Good:'#4C8CFF', Basic:'#F2B84B', Weak:'#E45A5A', 'Not Food':'#4A5266' };
 const DEAL_CLASS = { Super:'Super', Good:'Good', Basic:'Basic', Weak:'Weak', 'Not Food':'Not' };
 const STATUS_COLORS = { Elite:'#3DDC97', Healthy:'#4C8CFF', Moderate:'#F2B84B', Low:'#E45A5A' };
+const PERIOD_COLORS = { breakfast:'#F2B84B', lunch:'#3DDC97', afternoon:'#4C8CFF', dinner:'#FF5A36', night:'#B389F2' };
 
 const SUPER_TYPE_LABELS = { 1: 'Restaurant', 2: 'Cafe', 3: 'Juice' };
 function superTypeGroups(){
@@ -210,23 +242,81 @@ function shareToPct(n){ return (Number(n||0)*100).toFixed(1)+'%'; }
 function toman(n){ return fmt(Math.round(n||0)) + ' T'; }
 
 /* ============================================================
-   LOAD DATA
+   LOAD + DECRYPT DATA
+   ============================================================
+   The published file is dashboard_data.enc — AES ciphertext produced by
+   encrypt.js. It's fetched as-is (unreadable via View Source) and only
+   decrypted in-browser once the viewer enters the correct password.
    ============================================================ */
-fetch('./dashboard_data.json')
-  .then(r => { if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-  .then(json => {
-    DATA = json;
-    document.getElementById('generatedAt').textContent =
-      'Generated ' + new Date(json.generatedAt).toLocaleString('en-US', {dateStyle:'medium', timeStyle:'short'});
-    renderFilterBar();
-    render();
-  })
-  .catch(err => {
-    document.getElementById('root').innerHTML =
-      '<div class="empty-state">Could not load dashboard_data.json<br><br>' +
-      'Run <code>node update_dashboard.js</code> in this folder first, then reload this page.<br><br>' +
-      '<span style="color:var(--text-faint); font-size:11px;">' + err.message + '</span></div>';
-  });
+const SESSION_KEY = 'm41_dash_pw';
+
+function loadEncryptedData(password){
+  return fetch('./dashboard_data.enc?v=' + Date.now())
+    .then(r => { if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+    .then(ciphertext => {
+      let plaintext;
+      try {
+        const bytes = CryptoJS.AES.decrypt(ciphertext, password);
+        plaintext = bytes.toString(CryptoJS.enc.Utf8);
+      } catch(e) {
+        plaintext = '';
+      }
+      if(!plaintext) throw new Error('WRONG_PASSWORD');
+      return JSON.parse(plaintext);
+    });
+}
+
+function unlockDashboard(json){
+  DATA = json;
+  document.getElementById('generatedAt').textContent =
+    'Generated ' + new Date(json.generatedAt).toLocaleString('en-US', {dateStyle:'medium', timeStyle:'short'});
+  document.body.classList.remove('locked');
+  document.getElementById('lockScreen').style.display = 'none';
+  renderFilterBar();
+  render();
+}
+
+function attemptUnlock(password, fromSession){
+  const btn = document.getElementById('lockSubmit');
+  const errEl = document.getElementById('lockError');
+  btn.disabled = true;
+  errEl.textContent = '';
+  loadEncryptedData(password)
+    .then(json => {
+      try { sessionStorage.setItem(SESSION_KEY, password); } catch(e){}
+      unlockDashboard(json);
+    })
+    .catch(err => {
+      btn.disabled = false;
+      if(fromSession){
+        try { sessionStorage.removeItem(SESSION_KEY); } catch(e){}
+        return; // silently fall back to asking for the password
+      }
+      if(err.message === 'WRONG_PASSWORD'){
+        errEl.textContent = 'Incorrect password — try again.';
+      } else {
+        errEl.textContent = 'Could not load dashboard data (' + err.message + ').';
+      }
+    });
+}
+
+document.getElementById('lockSubmit').addEventListener('click', () => {
+  const pw = document.getElementById('lockPassword').value;
+  if(pw) attemptUnlock(pw, false);
+});
+document.getElementById('lockPassword').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){
+    const pw = document.getElementById('lockPassword').value;
+    if(pw) attemptUnlock(pw, false);
+  }
+});
+
+// If this browser already unlocked successfully this session, skip the prompt.
+(function(){
+  let cached = null;
+  try { cached = sessionStorage.getItem(SESSION_KEY); } catch(e){}
+  if(cached) attemptUnlock(cached, true);
+})();
 
 /* ============================================================
    GLOBAL FILTER BAR (Vendor Type) — applies to all tabs except Coverage Model
@@ -246,13 +336,14 @@ function renderFilterBar(){
       superTypeFilter = el.dataset.super;
       drill.vendorCoverage = {city:null, area:null, vendorId:null};
       drill.packDistribution = {city:null, area:null};
+      drill.impression = {city:null, area:null};
       renderFilterBar();
       render();
     });
   });
 }
 function filterBarVisible(){
-  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen') ? 'none' : '';
+  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen' || currentPanel === 'cpoBudget') ? 'none' : '';
 }
 function matchesSuperType(item){
   if(superTypeFilter === 'all') return true;
@@ -283,9 +374,11 @@ function render(){
   const root = document.getElementById('root');
   if(currentPanel === 'vendorCoverage') root.innerHTML = renderVendorCoverage();
   else if(currentPanel === 'packDistribution') root.innerHTML = renderPackDistribution();
+  else if(currentPanel === 'impression') root.innerHTML = renderImpression();
   else if(currentPanel === 'rating') root.innerHTML = renderRating();
   else if(currentPanel === 'orderShare') root.innerHTML = renderOrderShare();
   else if(currentPanel === 'kitchen') root.innerHTML = renderKitchen();
+  else if(currentPanel === 'cpoBudget') root.innerHTML = renderCpoBudget();
   else if(currentPanel === 'coverageModel') root.innerHTML = renderCoverageModel();
   attachHandlers();
 }
@@ -655,6 +748,211 @@ function packAreaCard(area, v){
 }
 
 /* ============================================================
+   MODULE: IMPRESSION (yesterday, per pack, half-hour buckets)
+   ============================================================ */
+function recomputeImpressionBlock(packs){
+  const total = packs.reduce((s,x)=>s+x.total,0);
+  const bySlot = new Array(34).fill(0);
+  packs.forEach(x => x.bySlot.forEach((v,i)=>{ bySlot[i]+=v; }));
+  const periods = DATA.impression.periods;
+  const byPeriod = {};
+  periods.forEach(per => { byPeriod[per.key] = bySlot.slice(per.range[0], per.range[1]).reduce((a,b)=>a+b,0); });
+  const vendorCount = new Set(packs.map(x=>x.vendorId)).size;
+  const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
+  const kitchenTotal = packs.filter(x=>x.kitchen).reduce((s,x)=>s+x.total,0);
+  const segATotal = packs.filter(x=>x.segment==='A').reduce((s,x)=>s+x.total,0);
+  const segBTotal = packs.filter(x=>x.segment==='B').reduce((s,x)=>s+x.total,0);
+  const dealTypeTotals = {}, dealTypePcts = {};
+  DEAL_TYPES.forEach(dt => { const t = packs.filter(x=>x.dealType===dt).reduce((s,x)=>s+x.total,0); dealTypeTotals[dt]=t; dealTypePcts[dt]=p(t,total); });
+  return {
+    total, packCount: packs.length, vendorCount, avgPerPack: packs.length ? Math.round(total/packs.length) : 0,
+    bySlot, byPeriod,
+    kitchenTotal, kitchenTotal_pct: p(kitchenTotal,total),
+    nonKitchenTotal: total-kitchenTotal, nonKitchenTotal_pct: p(total-kitchenTotal,total),
+    segATotal, segATotal_pct: p(segATotal,total), segBTotal, segBTotal_pct: p(segBTotal,total),
+    dealTypeTotals, dealTypePcts, packs,
+  };
+}
+
+function peakPeriodLabel(bySlot){
+  const periods = DATA.impression.periods;
+  let best = null, bestVal = -1;
+  periods.forEach(per => {
+    const v = bySlot.slice(per.range[0], per.range[1]).reduce((a,b)=>a+b,0);
+    if(v > bestVal){ bestVal = v; best = per; }
+  });
+  return best ? best.label.replace(/\s*\([^)]*\)/,'') : '—';
+}
+
+function renderImpression(){
+  const d = drill.impression;
+  const imp = DATA.impression;
+  if(!imp){
+    return `<div class="empty-state">No Impression data available. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
+  }
+  const filtered = superTypeFilter !== 'all';
+
+  if(!d.city){
+    let cities;
+    if(!filtered){
+      cities = Object.entries(imp.byCity).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      cities = Object.entries(imp.byCity).map(([city, cdata]) => {
+        const allPacks = Object.values(cdata.areas).flatMap(a=>a.packs);
+        return [city, recomputeImpressionBlock(allPacks.filter(matchesSuperType))];
+      }).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const overall = filtered ? recomputeImpressionBlock(cities.flatMap(([,v])=>v.packs)) : imp.overall;
+    const periods = imp.periods;
+
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="section-note">Impressions are for yesterday only — the source sheet has no historical/MTD window (yet).</div>
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(overall.total)}</div></div>
+        <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(overall.packCount)}</div></div>
+        <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(overall.vendorCount)}</div></div>
+        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(overall.avgPerPack)}</div></div>
+        <div class="stat-card purple"><div class="label">Kitchen Share</div><div class="value small">${pct1(overall.kitchenTotal_pct)}</div></div>
+        <div class="stat-card seg-a"><div class="label">Segment A Share</div><div class="value small">${pct1(overall.segATotal_pct)}</div></div>
+        <div class="stat-card seg-b"><div class="label">Segment B Share</div><div class="value small">${pct1(overall.segBTotal_pct)}</div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
+        <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
+      </div>
+      <div class="section-title">Impressions by Deal Type</div>
+      <div class="stat-row">
+        ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value small" style="color:${DEAL_COLORS[dt]}">${fmt(overall.dealTypeTotals[dt]||0)}<span class="pct-tag">${pct1(overall.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
+      </div>
+      <div class="section-title">Cities</div>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => impressionCityCard(city,v)).join('')}
+      </div>
+      ${!filtered ? renderImpressionConversion() : '<div class="section-note">Impression → Order Conversion is only available for the unfiltered (All) Vendor Type view.</div>'}`;
+  }
+
+  if(d.city && !d.area){
+    const cdata = imp.byCity[d.city];
+    let areas;
+    if(!filtered){
+      areas = Object.entries(cdata.areas).sort((a,b)=>b[1].total-a[1].total);
+    } else {
+      areas = Object.entries(cdata.areas).map(([area, adata]) => [area, recomputeImpressionBlock(adata.packs.filter(matchesSuperType))]).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
+    }
+    const cBlock = filtered ? recomputeImpressionBlock(areas.flatMap(([,v])=>v.packs)) : cdata;
+    return `
+      ${breadcrumb(['All Cities', d.city], ['imp-city-null', null])}
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(cBlock.total)}</div></div>
+        <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(cBlock.packCount)}</div></div>
+        <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(cBlock.vendorCount)}</div></div>
+        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(cBlock.avgPerPack)}</div></div>
+        <div class="stat-card purple"><div class="label">Kitchen Share</div><div class="value small">${pct1(cBlock.kitchenTotal_pct)}</div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
+        <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => impressionAreaCard(area,v)).join('')}
+      </div>`;
+  }
+
+  const rawArea = imp.byCity[d.city].areas[d.area];
+  const adata = filtered ? recomputeImpressionBlock(rawArea.packs.filter(matchesSuperType)) : rawArea;
+  const packs = [...adata.packs].sort((a,b)=> b.total - a.total);
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['imp-city-null', 'imp-area-null', null])}
+    <div class="stat-row">
+      <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(adata.total)}</div></div>
+      <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(adata.packCount)}</div></div>
+      <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(adata.vendorCount)}</div></div>
+      <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(adata.avgPerPack)}</div></div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
+      <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
+    </div>
+    <input class="search-box" id="impPackSearch" placeholder="Filter packs by title or vendor…">
+    <div class="section-note">Peak Period = the meal window (of the five below) with the most impressions for that pack.</div>
+    <div class="table-wrap">
+      <table id="impPackTable">
+        <thead><tr><th>Pack</th><th>Vendor</th><th>Kitchen</th><th>Deal Type</th><th>Total Impressions</th><th>Peak Period</th></tr></thead>
+        <tbody>
+          ${packs.map(pk => `<tr data-name="${escapeHtml((pk.title+' '+pk.vendorName).toLowerCase())}">
+            <td>${escapeHtml(pk.title||'—')}</td>
+            <td>${escapeHtml(pk.vendorName)}</td>
+            <td>${pk.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
+            <td><span class="badge deal-${DEAL_CLASS[pk.dealType]||'Not'}">${escapeHtml(pk.dealType)}</span></td>
+            <td style="font-family:var(--mono); color:var(--accent)">${fmt(pk.total)}</td>
+            <td>${peakPeriodLabel(pk.bySlot)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function impressionCityCard(city, v){
+  return `<div class="list-card" data-action="imp-city" data-city="${escapeAttr(city)}">
+    <div class="name">${escapeHtml(city)}</div>
+    <div class="row"><span>Total impressions</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Packs seen</span><b>${fmt(v.packCount)}</b></div>
+    <div class="row"><span>Vendors seen</span><b>${fmt(v.vendorCount)}</b></div>
+    <div class="row"><span>Avg / pack</span><b>${fmt(v.avgPerPack)}</b></div>
+  </div>`;
+}
+function impressionAreaCard(area, v){
+  return `<div class="list-card" data-action="imp-area" data-area="${escapeAttr(area)}">
+    <div class="name">${escapeHtml(area)}</div>
+    <div class="row"><span>Total impressions</span><b>${fmt(v.total)}</b></div>
+    <div class="row"><span>Packs seen</span><b>${fmt(v.packCount)}</b></div>
+    <div class="row"><span>Vendors seen</span><b>${fmt(v.vendorCount)}</b></div>
+  </div>`;
+}
+
+const IMPRESSION_CONVERSION_MIN_IMPRESSIONS = 100; // floor for conversion-ranked views, to avoid 1-2 packs of noise showing 500%+ "conversion"
+
+function renderImpressionConversion(){
+  const vendors = DATA.impression.conversion.vendors;
+  const sortKey = impressionConversionSort;
+  const pool = sortKey === 'totalImpression' ? vendors : vendors.filter(v => v.totalImpression >= IMPRESSION_CONVERSION_MIN_IMPRESSIONS);
+  const sorted = [...pool].sort((a,b) => (b[sortKey] ?? -1) - (a[sortKey] ?? -1));
+  const top = sorted.slice(0, 50);
+  return `
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Impression → Order Conversion (Vendors, Yesterday)</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${sortKey==='totalImpression'?'active':''}" data-impsort="totalImpression">Most Seen</div>
+        <div class="toggle-btn ${sortKey==='conversion'?'active':''}" data-impsort="conversion">Best M4O Conversion</div>
+        <div class="toggle-btn ${sortKey==='platformConversion'?'active':''}" data-impsort="platformConversion">Best Platform Conversion</div>
+      </div>
+    </div>
+    <div class="section-note">Conversion = M4O Orders (yesterday) ÷ Total Impressions (yesterday), at vendor level — the Order sheet has no per-pack breakdown, so pack-level conversion isn't available. ${sortKey !== 'totalImpression' ? `Conversion rankings only include vendors with ≥ ${fmt(IMPRESSION_CONVERSION_MIN_IMPRESSIONS)} impressions (${fmt(pool.length)} of ${fmt(vendors.length)}), so a couple of stray orders on a barely-seen vendor can't fake a 500%+ "conversion rate". ` : ''}Top ${Math.min(50, sorted.length)} vendors by the selected sort, out of ${fmt(pool.length)}.</div>
+    <input class="search-box" id="impConvSearch" placeholder="Filter vendors by name…">
+    <div class="table-wrap">
+      <table id="impConvTable">
+        <thead><tr><th>Vendor</th><th>City</th><th>Area</th><th>Segment</th><th>Packs</th><th>Total Impressions</th><th>M4O Orders</th><th>Platform Orders</th><th>M4O Conversion</th><th>Platform Conversion</th></tr></thead>
+        <tbody>
+          ${top.map(v => `<tr data-name="${escapeHtml(v.name.toLowerCase())}">
+            <td>${escapeHtml(v.name)} ${v.kitchen ? '<span class="badge kit">Kitchen</span>' : ''}</td>
+            <td>${escapeHtml(v.city)}</td>
+            <td>${escapeHtml(v.area)}</td>
+            <td><span class="badge seg-${escapeAttr(v.segment)}">${escapeHtml(v.segment)}</span></td>
+            <td>${fmt(v.packCount)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.totalImpression)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.ordersYesterday)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.platformOrdersYesterday)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${v.conversion !== null ? (v.conversion*100).toFixed(3)+'%' : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${v.platformConversion !== null ? (v.platformConversion*100).toFixed(3)+'%' : '<span class="dim">—</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/* ============================================================
    MODULE 3: RATING (per city AND per Marketing Area, SuperType-filterable)
    ============================================================ */
 function renderRating(){
@@ -1005,6 +1303,150 @@ function renderKitchen(){
     </div>`;
 }
 
+/* ============================================================
+   MODULE: CPO BUDGET (month-to-date, Gregorian month, updated daily)
+   ============================================================ */
+function cpoRow(label, m, opts){
+  opts = opts || {};
+  return `<tr>
+    <td>${escapeHtml(label)}</td>
+    <td style="font-family:var(--mono)">${fmt(m.vendorCount)}</td>
+    <td style="font-family:var(--mono)">${toman(m.subsidyBudget)}</td>
+    <td style="font-family:var(--mono)">${toman(m.freeDeliveryBudget)}</td>
+    <td style="font-family:var(--mono); font-weight:600">${toman(m.totalBudget)}</td>
+    <td style="font-family:var(--mono)">${fmt(m.m4oOrders)}</td>
+    <td style="font-family:var(--mono)">${fmt(m.totalSold)}</td>
+    <td style="font-family:var(--mono); color:var(--accent)">${m.cpo!==null ? toman(m.cpo) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--seg-b)">${m.freeDeliveryCpo!==null ? toman(m.freeDeliveryCpo) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--purple)">${m.subsidyCps!==null ? toman(m.subsidyCps) : '<span class="dim">—</span>'}</td>
+  </tr>`;
+}
+function cpoBreakdownTable(title, note, breakdown, order){
+  const keys = order ? order.filter(k=>breakdown[k]) : Object.keys(breakdown).sort((a,b)=>breakdown[b].totalBudget-breakdown[a].totalBudget);
+  return `
+    <div class="section-title">${title}</div>
+    ${note ? `<div class="section-note">${note}</div>` : ''}
+    <div class="table-wrap" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
+        <tbody>${keys.map(k => cpoRow(k, breakdown[k])).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderCpoBudget(){
+  const cpo = DATA.cpoBudget;
+  if(!cpo){
+    return `<div class="empty-state">No CPO Budget data available. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
+  }
+  const d = drill.cpoBudget;
+
+  if(!d.city){
+    const nk = cpo.overall.nonKitchen;
+    const kAll = cpo.overall.kitchen.total;
+    const cities = Object.entries(cpo.byCity).sort((a,b)=>b[1].totalBudget-a[1].totalBudget);
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="section-note">Month-to-date (Gregorian calendar month, updated daily) — same MTD convention as the rest of the dashboard.</div>
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(cpo.overall.all.totalBudget)}</div></div>
+        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(cpo.overall.all.subsidyBudget)}</div></div>
+        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(cpo.overall.all.freeDeliveryBudget)}</div></div>
+        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cpo.overall.all.cpo!==null?toman(cpo.overall.all.cpo):'—'}</div></div>
+        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cpo.overall.all.freeDeliveryCpo!==null?toman(cpo.overall.all.freeDeliveryCpo):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cpo.overall.all.subsidyCps!==null?toman(cpo.overall.all.subsidyCps):'—'}</div></div>
+      </div>
+      <div class="section-note">CPO = Total Budget ÷ M4O Orders. Free Delivery CPO = Free Delivery Budget ÷ M4O Orders. Subsidy Cost/Sold = Subsidy Budget ÷ Total Sold (product subsidy is spent per sold unit, not per order, so it isn't a "CPO").</div>
+      ${cpoBreakdownTable('By Vendor Class (Non-Kitchen)', 'Kitchen vendors are excluded here — see the dedicated Kitchen block below — so they don’t distort these segments.', nk.byVendorClass, ['TopCritical','Critical','Important','Ordinary','Unknown'])}
+      ${cpoBreakdownTable('By Vendor Tier (Non-Kitchen)', null, nk.byVendorTier, ['A','B','C','D','Unknown'])}
+      ${cpoBreakdownTable('By New Vendor Class (Non-Kitchen)', null, nk.byNewVendorClass, ['TopCritical','Critical','Others','Unknown'])}
+      <div class="section-title">Kitchen (kept fully separate)</div>
+      <div class="section-note">Kitchen vendors can also be Critical/TopCritical/etc., so mixing them into the segments above would double up — they get their own line instead.</div>
+      <div class="table-wrap" style="margin-bottom:22px">
+        <table>
+          <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
+          <tbody>
+            ${cpoRow('Non-Kitchen (all)', nk.total)}
+            ${cpoRow('Kitchen', kAll)}
+          </tbody>
+        </table>
+      </div>
+      <div class="section-title">Cities</div>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => cpoCityCard(city,v)).join('')}
+      </div>`;
+  }
+
+  if(d.city && !d.area){
+    const cdata = cpo.byCity[d.city];
+    const areas = Object.entries(cdata.areas).sort((a,b)=>b[1].totalBudget-a[1].totalBudget);
+    return `
+      ${breadcrumb(['All Cities', d.city], ['cpo-city-null', null])}
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(cdata.totalBudget)}</div></div>
+        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(cdata.subsidyBudget)}</div></div>
+        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(cdata.freeDeliveryBudget)}</div></div>
+        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cdata.cpo!==null?toman(cdata.cpo):'—'}</div></div>
+        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cdata.freeDeliveryCpo!==null?toman(cdata.freeDeliveryCpo):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cdata.subsidyCps!==null?toman(cdata.subsidyCps):'—'}</div></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => cpoAreaCard(area,v)).join('')}
+      </div>`;
+  }
+
+  const adata = cpo.byCity[d.city].areas[d.area];
+  const vendors = [...adata.vendors].sort((a,b)=> b.totalBudget - a.totalBudget);
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['cpo-city-null', 'cpo-area-null', null])}
+    <div class="stat-row">
+      <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(adata.totalBudget)}</div></div>
+      <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(adata.subsidyBudget)}</div></div>
+      <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(adata.freeDeliveryBudget)}</div></div>
+      <div class="stat-card"><div class="label">CPO</div><div class="value small">${adata.cpo!==null?toman(adata.cpo):'—'}</div></div>
+    </div>
+    <input class="search-box" id="cpoVendorSearch" placeholder="Filter vendors by name…">
+    <div class="table-wrap">
+      <table id="cpoVendorTable">
+        <thead><tr><th>Vendor</th><th>Vendor Class</th><th>Tier</th><th>New Class</th><th>Kitchen</th><th>M4O Orders</th><th>Total Sold</th><th>Total Budget</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
+        <tbody>
+          ${vendors.map(v => `<tr data-name="${escapeHtml(v.name.toLowerCase())}">
+            <td>${escapeHtml(v.name)}</td>
+            <td><span class="badge vc-${escapeAttr((v.vendorClass||'Unknown').replace(' ',''))}">${escapeHtml(v.vendorClass)}</span></td>
+            <td><span class="badge seg-${escapeAttr(v.vendorTier)}">${escapeHtml(v.vendorTier)}</span></td>
+            <td>${escapeHtml(v.newVendorClass)}</td>
+            <td>${v.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${fmt(v.m4oOrders)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.totalSold)}</td>
+            <td style="font-family:var(--mono); font-weight:600">${toman(v.totalBudget)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${v.cpo!==null?toman(v.cpo):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${v.freeDeliveryCpo!==null?toman(v.freeDeliveryCpo):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${v.subsidyCps!==null?toman(v.subsidyCps):'<span class="dim">—</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function cpoCityCard(city, v){
+  return `<div class="list-card" data-action="cpo-city" data-city="${escapeAttr(city)}">
+    <div class="name">${escapeHtml(city)}</div>
+    <div class="row"><span>Total budget</span><b>${toman(v.totalBudget)}</b></div>
+    <div class="row"><span>M4O orders</span><b>${fmt(v.m4oOrders)}</b></div>
+    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?toman(v.cpo):'—'}</b></div>
+    <div class="row"><span>Vendors</span><b>${fmt(v.vendorCount)}</b></div>
+  </div>`;
+}
+function cpoAreaCard(area, v){
+  return `<div class="list-card" data-action="cpo-area" data-area="${escapeAttr(area)}">
+    <div class="name">${escapeHtml(area)}</div>
+    <div class="row"><span>Total budget</span><b>${toman(v.totalBudget)}</b></div>
+    <div class="row"><span>M4O orders</span><b>${fmt(v.m4oOrders)}</b></div>
+    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?toman(v.cpo):'—'}</b></div>
+  </div>`;
+}
+
 function renderCoverageModel(){
   const cm = DATA.coverageModel || { cityCoverage:{}, coverageResult:{} };
   const cityNames = Object.keys(cm.cityCoverage || {});
@@ -1135,6 +1577,21 @@ function attachHandlers(){
   document.querySelectorAll('[data-action="os-city"]').forEach(el => {
     el.addEventListener('click', () => { drill.orderShare.city = el.dataset.city; render(); });
   });
+  document.querySelectorAll('[data-action="imp-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.impression.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="imp-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.impression.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-impsort]').forEach(el => {
+    el.addEventListener('click', () => { impressionConversionSort = el.dataset.impsort; render(); });
+  });
+  document.querySelectorAll('[data-action="cpo-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.cpoBudget.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="cpo-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.cpoBudget.area = el.dataset.area; render(); });
+  });
   document.querySelectorAll('[data-crumb]').forEach(el => {
     el.addEventListener('click', () => {
       const [module, level] = el.dataset.crumb.split('-');
@@ -1148,6 +1605,8 @@ function attachHandlers(){
       if(module === 'cm'){ if(level==='city') { drill.coverageModel.city=null; } }
       if(module === 'kt'){ if(level==='city') { drill.kitchen.city=null; drill.kitchen.area=null; } if(level==='area'){ drill.kitchen.area=null; } }
       if(module === 'os'){ if(level==='city') { drill.orderShare.city=null; } }
+      if(module === 'imp'){ if(level==='city') { drill.impression.city=null; drill.impression.area=null; } if(level==='area'){ drill.impression.area=null; } }
+      if(module === 'cpo'){ if(level==='city') { drill.cpoBudget.city=null; drill.cpoBudget.area=null; } if(level==='area'){ drill.cpoBudget.area=null; } }
       render();
     });
   });
@@ -1159,6 +1618,12 @@ function attachHandlers(){
   if(vendorSearch) vendorSearch.addEventListener('input', () => filterTable('vendorTable', vendorSearch.value));
   const packSearch = document.getElementById('packSearch');
   if(packSearch) packSearch.addEventListener('input', () => filterTable('packTable', packSearch.value));
+  const impPackSearch = document.getElementById('impPackSearch');
+  if(impPackSearch) impPackSearch.addEventListener('input', () => filterTable('impPackTable', impPackSearch.value));
+  const impConvSearch = document.getElementById('impConvSearch');
+  if(impConvSearch) impConvSearch.addEventListener('input', () => filterTable('impConvTable', impConvSearch.value));
+  const cpoVendorSearch = document.getElementById('cpoVendorSearch');
+  if(cpoVendorSearch) cpoVendorSearch.addEventListener('input', () => filterTable('cpoVendorTable', cpoVendorSearch.value));
 
   drawCharts();
 }
@@ -1249,6 +1714,42 @@ function drawCharts(){
         data:{ labels: top.map(([c])=>c), datasets:[{ data: top.map(([,v])=>v), backgroundColor:'#3DDC97', borderRadius:4 }]},
         options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}, min:0, max:10}, y:{grid:{display:false}} } }
       });
+    }
+  }
+
+  if(currentPanel === 'impression'){
+    const imp = DATA.impression;
+    if(imp){
+      const d = drill.impression;
+      const filtered = superTypeFilter !== 'all';
+      let block;
+      if(!d.city){
+        block = filtered ? recomputeImpressionBlock(Object.values(imp.byCity).flatMap(c=>Object.values(c.areas)).flatMap(a=>a.packs).filter(matchesSuperType)) : imp.overall;
+      } else if(d.city && !d.area){
+        const cdata = imp.byCity[d.city];
+        const allPacks = Object.values(cdata.areas).flatMap(a=>a.packs);
+        block = filtered ? recomputeImpressionBlock(allPacks.filter(matchesSuperType)) : cdata;
+      } else {
+        const rawArea = imp.byCity[d.city].areas[d.area];
+        block = filtered ? recomputeImpressionBlock(rawArea.packs.filter(matchesSuperType)) : rawArea;
+      }
+      const ctx1 = document.getElementById('impTimeChart');
+      if(ctx1){
+        charts.impTimeChart = new Chart(ctx1, {
+          type:'line',
+          data:{ labels: imp.timeSlots, datasets:[{ data: block.bySlot, borderColor:'#FF5A36', backgroundColor:'rgba(255,90,54,.12)', fill:true, tension:.3, pointRadius:0 }]},
+          options:{ plugins:{legend:{display:false}}, scales:{ x:{ grid:{display:false}, ticks:{ maxTicksLimit:8 } }, y:{grid:{color:gridColor}} } }
+        });
+      }
+      const ctx2 = document.getElementById('impPeriodChart');
+      if(ctx2){
+        const periods = imp.periods;
+        charts.impPeriodChart = new Chart(ctx2, {
+          type:'bar',
+          data:{ labels: periods.map(p=>p.label), datasets:[{ data: periods.map(p=>block.byPeriod[p.key]||0), backgroundColor: periods.map(p=>PERIOD_COLORS[p.key]), borderRadius:4 }]},
+          options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:gridColor}} } }
+        });
+      }
     }
   }
 

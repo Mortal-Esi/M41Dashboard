@@ -1,0 +1,21 @@
+{
+  "name": "meal4one-dashboard-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Syncs Meal4One dashboard data from Google Sheets",
+  "scripts": {
+    "update": "node update_dashboard.js"
+  },
+  "dependencies": {
+    "crypto-js": "^4.2.0",
+    "googleapis": "^140.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "main": "update_dashboard.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
