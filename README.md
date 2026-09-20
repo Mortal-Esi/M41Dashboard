@@ -149,8 +149,11 @@ is the stronger route.
 - **Kitchen tab**: a dedicated view of `Kitchen == 1` vendors/packs —
   vendor and pack counts per city/Marketing Area, order volume,
   M4O share, and average rating, plus each Kitchen vendor's share of
-  the *entire* project's M4O order volume. Not affected by the
-  Vendor Type filter (Kitchen vendors are a separate slice).
+  the *entire* project's M4O order volume. The comparison table also
+  adds Kitchen vs. Non-Kitchen's share of total impressions (from the
+  Impression tab) and Total Budget / CPO (from the CPO Budget tab),
+  when that data is available. Not affected by the Vendor Type filter
+  (Kitchen vendors are a separate slice).
 - **Rating buckets**: 0-2, 2-4, 4-6, 6-8, 8-10. `Rate == 0` is treated
   as "No Rating" and excluded from both the average and the bucket
   distribution — but its count and % (of all packs, not just rated
@@ -183,20 +186,27 @@ is the stronger route.
   object keys, so the 34-slot layout is hardcoded in
   `update_dashboard.js`. A handful of PackIDs appear twice in the
   source sheet; those are summed. Each pack is joined to MainData by
-  PackID to pick up Deal Type, Kitchen, Segment, Top Critical and
-  Marketing Area. The dashboard groups the 34 slots into five meal
-  periods (Breakfast 07–10, Lunch 10–14, Afternoon 14–18, Dinner
-  18–22, Night 22–24) for a more readable chart.
-  - **Impression → Order Conversion**: since the Order sheet has no
-    per-pack breakdown, conversion (M4O Orders ÷ Impressions, and
-    Platform Orders ÷ Impressions) is computed at the **vendor**
-    level only, both using yesterday's numbers. Vendors with fewer
-    than 100 impressions are excluded from the conversion rankings
-    (but not from "Most Seen") — below that, a couple of stray
-    orders can make a barely-seen vendor look like it has a 500%+
-    conversion rate.
+  PackID to pick up Deal Type, Kitchen, Segment, Top Critical, Vendor
+  Class (from the CPO sheet — see below) and Marketing Area. Only
+  packs with at least one impression are counted ("Packs w/
+  Impressions" / "Vendors w/ Impressions"); a sheet row with
+  `total_impression == 0` isn't a pack anyone actually saw. There's
+  no meal-period breakdown (Breakfast/Lunch/…) anymore — just one
+  time-of-day trend chart over the 34 half-hour slots.
+  - **Impression → Order Conversion**: since impressions only cover
+    the Meal4One carousel, only **M4O orders** are a meaningful
+    numerator here — a platform-wide-orders ratio isn't shown at all.
+    Conversion (M4O Orders ÷ Impressions, yesterday) is computed at
+    the **vendor** level and rolled up from there by City, Marketing
+    Area, and vendor segment (Kitchen / Top Critical / Critical /
+    Other). Vendors with fewer than 100 impressions are excluded
+    from the conversion rankings (but not from "Most Seen") — below
+    that, a couple of stray orders can make a barely-seen vendor look
+    like it has a 500%+ conversion rate.
   - Respects the Vendor Type filter like Pack Distribution; the
-    conversion table is only shown on the unfiltered (All) view.
+    conversion tables are only shown on the unfiltered (All) view.
+  - Large numbers (impressions) are shown compact (e.g. `1.2M`), same
+    as CPO Budget below.
   - **Known open issue**: in the original snapshot, the sum of the 34
     half-hour buckets was consistently about half of the sheet's own
     `total_impression` column. The dashboard currently trusts
@@ -221,21 +231,47 @@ is the stronger route.
   - **Subsidy Cost / Sold** = Subsidy Budget ÷ `TotalSold` — product
     subsidy is spent per sold unit, not per order, so it isn't a
     "CPO" in the usual sense.
-  - **Kitchen is kept fully separate.** Kitchen vendors can also be
-    Critical/TopCritical/etc., so they're excluded from the By Vendor
-    Class / By Vendor Tier / By New Vendor Class breakdowns entirely
-    (folding them in would double-count them into whichever other
-    class they also carry) and shown as their own single line
-    instead. The City → Marketing Area → Vendor drill-down is
-    unaffected by this and includes Kitchen vendors normally (tagged
-    with the Kitchen badge), since that's a geography view, not a
-    segment view.
-  - The four segment axes used are `VendorClass`, `VendorTier`,
-    `Kitchen`, and `new_VendorClass`; `Decile` and `Segment` are
-    shown per-vendor in the drill-down table for context but don't
-    get their own breakdown table.
+  - **Every budget figure carries its % of the project-wide grand
+    total for that same metric** next to the Toman amount (e.g.
+    "12.3M T (18%)") — a raw amount alone doesn't say whether a city
+    or segment is 2% or 40% of spend. Large amounts are shown compact
+    (`K`/`M`/`B`) instead of full Toman digits.
+  - **Just two breakdowns** instead of the old four: geography
+    (City → Marketing Area → Vendor, unchanged) and segment. The
+    segment breakdown is **Kitchen vs. Non-Kitchen**, with Non-Kitchen
+    further split into **Top Critical / Critical / Other** (Other =
+    Important + Ordinary + anything uncategorized) — using the CPO
+    sheet's own `VendorClass` column. The old separate By Vendor Tier
+    and By New Vendor Class tables were dropped; `VendorTier` and
+    `new_VendorClass` are still shown per-vendor in the drill-down
+    table for context.
+  - **Kitchen is kept fully separate** in that segment breakdown —
+    Kitchen vendors can also be Critical/TopCritical/etc., so mixing
+    them in would double-count them. The City → Marketing Area →
+    Vendor drill-down is unaffected by this and includes Kitchen
+    vendors normally (tagged with the Kitchen badge), since that's a
+    geography view, not a segment view.
   - Doesn't respect the Vendor Type filter (hidden on this tab, like
     Kitchen) — it has its own segmentation already.
+  - The same Kitchen/Top Critical/Critical/Other segmentation is
+    reused by the Impression tab's conversion breakdown (via a shared
+    `vendorSegmentClass()` helper), so the two tabs use one consistent
+    vendor segmentation.
+
+- **Availability** (Pack Distribution tab, all levels): of the packs
+  that are `Activity == 1` right now, what share actually picked up
+  at least one impression yesterday? A low number means "marked
+  active in the sheet" isn't the same as "actually being shown to
+  users." This directly answers whether Activity, Order (`PO`), and
+  Impression are all pulling weight: they already are — a pack enters
+  the dataset at all if `Activity==1` OR `PO>0` (had a platform order
+  yesterday) OR it has an impression (rescued even if Activity/PO
+  both read 0, see the Pack filter rule above); a vendor counts as
+  "in the dataset" if it has at least one such surviving pack, i.e.
+  vendor-level activity is derived from pack-level activity, not
+  computed independently. Availability then adds a second, narrower
+  question on top of that inclusion rule: among packs the sheet
+  currently calls active, how many were actually surfaced to a user?
 
 The whole UI is English-only (including the Vendor Type filter
 labels); city and area names stay as they appear in the source data.

@@ -214,7 +214,7 @@
 let DATA = null;
 let currentPanel = 'vendorCoverage';
 let drill = { vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null} };
-let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion' | 'platformConversion'
+let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion'
 let orderWindow = 'mtd';
 let superTypeFilter = 'all'; // 'all' or a group key from SUPER_TYPE_GROUPS
 const charts = {};
@@ -224,7 +224,6 @@ const DEAL_TYPES = ['Super','Good','Basic','Weak','Not Food'];
 const DEAL_COLORS = { Super:'#3DDC97', Good:'#4C8CFF', Basic:'#F2B84B', Weak:'#E45A5A', 'Not Food':'#4A5266' };
 const DEAL_CLASS = { Super:'Super', Good:'Good', Basic:'Basic', Weak:'Weak', 'Not Food':'Not' };
 const STATUS_COLORS = { Elite:'#3DDC97', Healthy:'#4C8CFF', Moderate:'#F2B84B', Low:'#E45A5A' };
-const PERIOD_COLORS = { breakfast:'#F2B84B', lunch:'#3DDC97', afternoon:'#4C8CFF', dinner:'#FF5A36', night:'#B389F2' };
 
 const SUPER_TYPE_LABELS = { 1: 'Restaurant', 2: 'Cafe', 3: 'Juice' };
 function superTypeGroups(){
@@ -240,6 +239,24 @@ function fmt(n){ return Number(n||0).toLocaleString('en-US'); }
 function pct1(n){ return (Number(n||0)).toFixed(1)+'%'; }
 function shareToPct(n){ return (Number(n||0)*100).toFixed(1)+'%'; }
 function toman(n){ return fmt(Math.round(n||0)) + ' T'; }
+// Compact K/M/B formatting for large numbers (budgets, impressions) — full
+// precision under 1000, otherwise 1 decimal (0 decimals once 3 digits before it).
+function fmtCompact(n){
+  n = Number(n||0);
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  if(abs < 1000) return sign + Math.round(abs).toLocaleString('en-US');
+  const units = [[1e9,'B'],[1e6,'M'],[1e3,'K']];
+  for(const [v, suffix] of units){
+    if(abs >= v){
+      const scaled = abs / v;
+      const str = scaled >= 100 ? Math.round(scaled).toString() : scaled.toFixed(1).replace(/\.0$/,'');
+      return sign + str + suffix;
+    }
+  }
+  return sign + Math.round(abs).toLocaleString('en-US');
+}
+function tomanCompact(n){ return fmtCompact(n) + ' T'; }
 
 /* ============================================================
    LOAD + DECRYPT DATA
@@ -413,11 +430,15 @@ function recomputePackBlock(packs){
   const coupSub = packs.filter(x=>x.couponSubsidy).length;
   const k0 = packs.filter(x=>!x.kitchen);
   const avgDiscount = k0.length ? Math.round(k0.reduce((s,x)=>s+x.snappDiscountToman,0)/k0.length) : 0;
+  const activePacks = packs.filter(x=>x.isActive);
+  const activeWithImpression = activePacks.filter(x=>x.hasImpression).length;
   return {
     total, dealTypeCounts, dealTypePcts, kitchen, kitchen_pct:p(kitchen,total),
     discountSubsidy:discSub, discountSubsidy_pct:p(discSub,total),
     couponSubsidy:coupSub, couponSubsidy_pct:p(coupSub,total),
     avgSnappDiscountToman: avgDiscount,
+    activePackCount: activePacks.length,
+    availability_pct: p(activeWithImpression, activePacks.length),
     packs,
   };
 }
@@ -657,6 +678,7 @@ function renderPackDistribution(){
         <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(overall.discountSubsidy)}<span class="pct-tag">${pct1(overall.discountSubsidy_pct)}</span></div></div>
         <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(overall.couponSubsidy)}<span class="pct-tag">${pct1(overall.couponSubsidy_pct)}</span></div></div>
         <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(overall.avgSnappDiscountToman)}</div></div>
+        <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(overall.availability_pct)}</div><div class="sub">Share of Activity==1 packs that got at least one impression</div></div>
       </div>
       <div class="chart-row">
         <div class="chart-box"><h3>Deal Type Distribution</h3><canvas id="dealTypeChart"></canvas></div>
@@ -686,6 +708,7 @@ function renderPackDistribution(){
         <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(cBlock.discountSubsidy)}<span class="pct-tag">${pct1(cBlock.discountSubsidy_pct)}</span></div></div>
         <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(cBlock.couponSubsidy)}<span class="pct-tag">${pct1(cBlock.couponSubsidy_pct)}</span></div></div>
         <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(cBlock.avgSnappDiscountToman)}</div></div>
+        <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(cBlock.availability_pct)}</div></div>
       </div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
       <div class="card-grid">
@@ -705,6 +728,7 @@ function renderPackDistribution(){
       <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(adata.discountSubsidy)}<span class="pct-tag">${pct1(adata.discountSubsidy_pct)}</span></div></div>
       <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(adata.couponSubsidy)}<span class="pct-tag">${pct1(adata.couponSubsidy_pct)}</span></div></div>
       <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(adata.avgSnappDiscountToman)}</div></div>
+      <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(adata.availability_pct)}</div></div>
     </div>
     <input class="search-box" id="packSearch" placeholder="Filter packs by title or vendor…">
     <div class="table-wrap">
@@ -754,9 +778,6 @@ function recomputeImpressionBlock(packs){
   const total = packs.reduce((s,x)=>s+x.total,0);
   const bySlot = new Array(34).fill(0);
   packs.forEach(x => x.bySlot.forEach((v,i)=>{ bySlot[i]+=v; }));
-  const periods = DATA.impression.periods;
-  const byPeriod = {};
-  periods.forEach(per => { byPeriod[per.key] = bySlot.slice(per.range[0], per.range[1]).reduce((a,b)=>a+b,0); });
   const vendorCount = new Set(packs.map(x=>x.vendorId)).size;
   const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
   const kitchenTotal = packs.filter(x=>x.kitchen).reduce((s,x)=>s+x.total,0);
@@ -766,22 +787,12 @@ function recomputeImpressionBlock(packs){
   DEAL_TYPES.forEach(dt => { const t = packs.filter(x=>x.dealType===dt).reduce((s,x)=>s+x.total,0); dealTypeTotals[dt]=t; dealTypePcts[dt]=p(t,total); });
   return {
     total, packCount: packs.length, vendorCount, avgPerPack: packs.length ? Math.round(total/packs.length) : 0,
-    bySlot, byPeriod,
+    bySlot,
     kitchenTotal, kitchenTotal_pct: p(kitchenTotal,total),
     nonKitchenTotal: total-kitchenTotal, nonKitchenTotal_pct: p(total-kitchenTotal,total),
     segATotal, segATotal_pct: p(segATotal,total), segBTotal, segBTotal_pct: p(segBTotal,total),
     dealTypeTotals, dealTypePcts, packs,
   };
-}
-
-function peakPeriodLabel(bySlot){
-  const periods = DATA.impression.periods;
-  let best = null, bestVal = -1;
-  periods.forEach(per => {
-    const v = bySlot.slice(per.range[0], per.range[1]).reduce((a,b)=>a+b,0);
-    if(v > bestVal){ bestVal = v; best = per; }
-  });
-  return best ? best.label.replace(/\s*\([^)]*\)/,'') : '—';
 }
 
 function renderImpression(){
@@ -803,27 +814,23 @@ function renderImpression(){
       }).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
     }
     const overall = filtered ? recomputeImpressionBlock(cities.flatMap(([,v])=>v.packs)) : imp.overall;
-    const periods = imp.periods;
 
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">Impressions are for yesterday only — the source sheet has no historical/MTD window (yet).</div>
+      <div class="section-note">Impressions are for yesterday only — the source sheet has no historical/MTD window (yet). They only cover packs shown in the Meal4One carousel, so "order" here always means M4O orders, never total platform orders.</div>
       <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(overall.total)}</div></div>
-        <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(overall.packCount)}</div></div>
-        <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(overall.vendorCount)}</div></div>
-        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(overall.avgPerPack)}</div></div>
+        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmtCompact(overall.total)}</div></div>
+        <div class="stat-card"><div class="label">Packs w/ Impressions</div><div class="value small">${fmt(overall.packCount)}</div></div>
+        <div class="stat-card"><div class="label">Vendors w/ Impressions</div><div class="value small">${fmt(overall.vendorCount)}</div></div>
+        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmtCompact(overall.avgPerPack)}</div></div>
         <div class="stat-card purple"><div class="label">Kitchen Share</div><div class="value small">${pct1(overall.kitchenTotal_pct)}</div></div>
         <div class="stat-card seg-a"><div class="label">Segment A Share</div><div class="value small">${pct1(overall.segATotal_pct)}</div></div>
         <div class="stat-card seg-b"><div class="label">Segment B Share</div><div class="value small">${pct1(overall.segBTotal_pct)}</div></div>
       </div>
-      <div class="chart-row">
-        <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
-        <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
-      </div>
+      <div class="chart-box"><h3>Impressions by Time of Day (half-hour trend)</h3><canvas id="impTimeChart"></canvas></div>
       <div class="section-title">Impressions by Deal Type</div>
       <div class="stat-row">
-        ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value small" style="color:${DEAL_COLORS[dt]}">${fmt(overall.dealTypeTotals[dt]||0)}<span class="pct-tag">${pct1(overall.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
+        ${DEAL_TYPES.map(dt => `<div class="stat-card"><div class="label">${dt}</div><div class="value small" style="color:${DEAL_COLORS[dt]}">${fmtCompact(overall.dealTypeTotals[dt]||0)}<span class="pct-tag">${pct1(overall.dealTypePcts[dt]||0)}</span></div></div>`).join('')}
       </div>
       <div class="section-title">Cities</div>
       <div class="card-grid">
@@ -841,23 +848,37 @@ function renderImpression(){
       areas = Object.entries(cdata.areas).map(([area, adata]) => [area, recomputeImpressionBlock(adata.packs.filter(matchesSuperType))]).filter(([,v]) => v.total > 0).sort((a,b)=>b[1].total-a[1].total);
     }
     const cBlock = filtered ? recomputeImpressionBlock(areas.flatMap(([,v])=>v.packs)) : cdata;
+    const areaConv = (!filtered && imp.conversion.byArea[d.city]) ? imp.conversion.byArea[d.city] : null;
     return `
       ${breadcrumb(['All Cities', d.city], ['imp-city-null', null])}
       <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(cBlock.total)}</div></div>
-        <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(cBlock.packCount)}</div></div>
-        <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(cBlock.vendorCount)}</div></div>
-        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(cBlock.avgPerPack)}</div></div>
+        <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmtCompact(cBlock.total)}</div></div>
+        <div class="stat-card"><div class="label">Packs w/ Impressions</div><div class="value small">${fmt(cBlock.packCount)}</div></div>
+        <div class="stat-card"><div class="label">Vendors w/ Impressions</div><div class="value small">${fmt(cBlock.vendorCount)}</div></div>
+        <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmtCompact(cBlock.avgPerPack)}</div></div>
         <div class="stat-card purple"><div class="label">Kitchen Share</div><div class="value small">${pct1(cBlock.kitchenTotal_pct)}</div></div>
       </div>
-      <div class="chart-row">
-        <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
-        <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
-      </div>
+      <div class="chart-box"><h3>Impressions by Time of Day (half-hour trend)</h3><canvas id="impTimeChart"></canvas></div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
       <div class="card-grid">
         ${areas.map(([area,v]) => impressionAreaCard(area,v)).join('')}
-      </div>`;
+      </div>
+      ${areaConv ? `
+      <div class="section-title">Order-to-Impression by Marketing Area</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Vendors</th><th>Impressions</th><th>M4O Orders</th><th>M4O Conversion</th></tr></thead>
+          <tbody>
+            ${Object.entries(areaConv).sort((a,b)=>b[1].totalImpression-a[1].totalImpression).map(([area,c]) => `<tr>
+              <td>${escapeHtml(area)}</td>
+              <td>${fmt(c.vendorCount)}</td>
+              <td style="font-family:var(--mono)">${fmtCompact(c.totalImpression)}</td>
+              <td style="font-family:var(--mono)">${fmt(c.ordersYesterday)}</td>
+              <td style="font-family:var(--mono); color:var(--accent)">${c.conversion!==null?(c.conversion*100).toFixed(3)+'%':'<span class="dim">—</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}`;
   }
 
   const rawArea = imp.byCity[d.city].areas[d.area];
@@ -866,28 +887,23 @@ function renderImpression(){
   return `
     ${breadcrumb(['All Cities', d.city, d.area], ['imp-city-null', 'imp-area-null', null])}
     <div class="stat-row">
-      <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmt(adata.total)}</div></div>
-      <div class="stat-card"><div class="label">Packs Seen</div><div class="value small">${fmt(adata.packCount)}</div></div>
-      <div class="stat-card"><div class="label">Vendors Seen</div><div class="value small">${fmt(adata.vendorCount)}</div></div>
-      <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmt(adata.avgPerPack)}</div></div>
+      <div class="stat-card accent"><div class="label">Total Impressions</div><div class="value">${fmtCompact(adata.total)}</div></div>
+      <div class="stat-card"><div class="label">Packs w/ Impressions</div><div class="value small">${fmt(adata.packCount)}</div></div>
+      <div class="stat-card"><div class="label">Vendors w/ Impressions</div><div class="value small">${fmt(adata.vendorCount)}</div></div>
+      <div class="stat-card"><div class="label">Avg / Pack</div><div class="value small">${fmtCompact(adata.avgPerPack)}</div></div>
     </div>
-    <div class="chart-row">
-      <div class="chart-box"><h3>Impressions by Time of Day (half-hour)</h3><canvas id="impTimeChart"></canvas></div>
-      <div class="chart-box"><h3>Impressions by Period</h3><canvas id="impPeriodChart"></canvas></div>
-    </div>
+    <div class="chart-box"><h3>Impressions by Time of Day (half-hour trend)</h3><canvas id="impTimeChart"></canvas></div>
     <input class="search-box" id="impPackSearch" placeholder="Filter packs by title or vendor…">
-    <div class="section-note">Peak Period = the meal window (of the five below) with the most impressions for that pack.</div>
     <div class="table-wrap">
       <table id="impPackTable">
-        <thead><tr><th>Pack</th><th>Vendor</th><th>Kitchen</th><th>Deal Type</th><th>Total Impressions</th><th>Peak Period</th></tr></thead>
+        <thead><tr><th>Pack</th><th>Vendor</th><th>Kitchen</th><th>Deal Type</th><th>Total Impressions</th></tr></thead>
         <tbody>
           ${packs.map(pk => `<tr data-name="${escapeHtml((pk.title+' '+pk.vendorName).toLowerCase())}">
             <td>${escapeHtml(pk.title||'—')}</td>
             <td>${escapeHtml(pk.vendorName)}</td>
             <td>${pk.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
             <td><span class="badge deal-${DEAL_CLASS[pk.dealType]||'Not'}">${escapeHtml(pk.dealType)}</span></td>
-            <td style="font-family:var(--mono); color:var(--accent)">${fmt(pk.total)}</td>
-            <td>${peakPeriodLabel(pk.bySlot)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${fmtCompact(pk.total)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -897,43 +913,76 @@ function renderImpression(){
 function impressionCityCard(city, v){
   return `<div class="list-card" data-action="imp-city" data-city="${escapeAttr(city)}">
     <div class="name">${escapeHtml(city)}</div>
-    <div class="row"><span>Total impressions</span><b>${fmt(v.total)}</b></div>
-    <div class="row"><span>Packs seen</span><b>${fmt(v.packCount)}</b></div>
-    <div class="row"><span>Vendors seen</span><b>${fmt(v.vendorCount)}</b></div>
-    <div class="row"><span>Avg / pack</span><b>${fmt(v.avgPerPack)}</b></div>
+    <div class="row"><span>Total impressions</span><b>${fmtCompact(v.total)}</b></div>
+    <div class="row"><span>Packs w/ impressions</span><b>${fmt(v.packCount)}</b></div>
+    <div class="row"><span>Vendors w/ impressions</span><b>${fmt(v.vendorCount)}</b></div>
+    <div class="row"><span>Avg / pack</span><b>${fmtCompact(v.avgPerPack)}</b></div>
   </div>`;
 }
 function impressionAreaCard(area, v){
   return `<div class="list-card" data-action="imp-area" data-area="${escapeAttr(area)}">
     <div class="name">${escapeHtml(area)}</div>
-    <div class="row"><span>Total impressions</span><b>${fmt(v.total)}</b></div>
-    <div class="row"><span>Packs seen</span><b>${fmt(v.packCount)}</b></div>
-    <div class="row"><span>Vendors seen</span><b>${fmt(v.vendorCount)}</b></div>
+    <div class="row"><span>Total impressions</span><b>${fmtCompact(v.total)}</b></div>
+    <div class="row"><span>Packs w/ impressions</span><b>${fmt(v.packCount)}</b></div>
+    <div class="row"><span>Vendors w/ impressions</span><b>${fmt(v.vendorCount)}</b></div>
   </div>`;
 }
 
 const IMPRESSION_CONVERSION_MIN_IMPRESSIONS = 100; // floor for conversion-ranked views, to avoid 1-2 packs of noise showing 500%+ "conversion"
+const IMPRESSION_SEGMENT_ORDER = ['Kitchen','TopCritical','Critical','Other'];
+const IMPRESSION_SEGMENT_LABELS = { Kitchen:'Kitchen', TopCritical:'Non-Kitchen — Top Critical', Critical:'Non-Kitchen — Critical', Other:'Non-Kitchen — Other (Important + Ordinary)' };
 
 function renderImpressionConversion(){
   const vendors = DATA.impression.conversion.vendors;
+  const byCity = DATA.impression.conversion.byCity;
+  const bySegment = DATA.impression.conversion.bySegment;
   const sortKey = impressionConversionSort;
   const pool = sortKey === 'totalImpression' ? vendors : vendors.filter(v => v.totalImpression >= IMPRESSION_CONVERSION_MIN_IMPRESSIONS);
   const sorted = [...pool].sort((a,b) => (b[sortKey] ?? -1) - (a[sortKey] ?? -1));
   const top = sorted.slice(0, 50);
   return `
+    <div class="section-title">Order-to-Impression by City</div>
+    <div class="table-wrap" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>City</th><th>Vendors</th><th>Impressions</th><th>M4O Orders</th><th>M4O Conversion</th></tr></thead>
+        <tbody>
+          ${Object.entries(byCity).sort((a,b)=>b[1].totalImpression-a[1].totalImpression).map(([city,c]) => `<tr class="clickable" data-action="imp-city" data-city="${escapeAttr(city)}">
+            <td>${escapeHtml(city)}</td>
+            <td>${fmt(c.vendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmtCompact(c.totalImpression)}</td>
+            <td style="font-family:var(--mono)">${fmt(c.ordersYesterday)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${c.conversion!==null?(c.conversion*100).toFixed(3)+'%':'<span class="dim">—</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="section-title">Order-to-Impression by Vendor Segment</div>
+    <div class="table-wrap" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>Segment</th><th>Vendors</th><th>Impressions</th><th>M4O Orders</th><th>M4O Conversion</th></tr></thead>
+        <tbody>
+          ${IMPRESSION_SEGMENT_ORDER.filter(k=>bySegment[k]).map(k => { const c = bySegment[k]; return `<tr>
+            <td>${escapeHtml(IMPRESSION_SEGMENT_LABELS[k])}</td>
+            <td>${fmt(c.vendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmtCompact(c.totalImpression)}</td>
+            <td style="font-family:var(--mono)">${fmt(c.ordersYesterday)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${c.conversion!==null?(c.conversion*100).toFixed(3)+'%':'<span class="dim">—</span>'}</td>
+          </tr>`; }).join('')}
+        </tbody>
+      </table>
+    </div>
     <div class="flex-between">
-      <div class="section-title" style="margin:0">Impression → Order Conversion (Vendors, Yesterday)</div>
+      <div class="section-title" style="margin:0">Order-to-Impression by Vendor (Yesterday)</div>
       <div class="toggle-group">
         <div class="toggle-btn ${sortKey==='totalImpression'?'active':''}" data-impsort="totalImpression">Most Seen</div>
         <div class="toggle-btn ${sortKey==='conversion'?'active':''}" data-impsort="conversion">Best M4O Conversion</div>
-        <div class="toggle-btn ${sortKey==='platformConversion'?'active':''}" data-impsort="platformConversion">Best Platform Conversion</div>
       </div>
     </div>
-    <div class="section-note">Conversion = M4O Orders (yesterday) ÷ Total Impressions (yesterday), at vendor level — the Order sheet has no per-pack breakdown, so pack-level conversion isn't available. ${sortKey !== 'totalImpression' ? `Conversion rankings only include vendors with ≥ ${fmt(IMPRESSION_CONVERSION_MIN_IMPRESSIONS)} impressions (${fmt(pool.length)} of ${fmt(vendors.length)}), so a couple of stray orders on a barely-seen vendor can't fake a 500%+ "conversion rate". ` : ''}Top ${Math.min(50, sorted.length)} vendors by the selected sort, out of ${fmt(pool.length)}.</div>
+    <div class="section-note">Conversion = M4O Orders (yesterday) ÷ Total Impressions (yesterday). Platform-wide orders aren't shown here: impressions only cover the Meal4One carousel, so a platform-order ratio wouldn't mean anything. ${sortKey !== 'totalImpression' ? `Conversion rankings only include vendors with ≥ ${fmt(IMPRESSION_CONVERSION_MIN_IMPRESSIONS)} impressions (${fmt(pool.length)} of ${fmt(vendors.length)}), so a couple of stray orders on a barely-seen vendor can't fake a 500%+ "conversion rate". ` : ''}Top ${Math.min(50, sorted.length)} vendors by the selected sort, out of ${fmt(pool.length)}.</div>
     <input class="search-box" id="impConvSearch" placeholder="Filter vendors by name…">
     <div class="table-wrap">
       <table id="impConvTable">
-        <thead><tr><th>Vendor</th><th>City</th><th>Area</th><th>Segment</th><th>Packs</th><th>Total Impressions</th><th>M4O Orders</th><th>Platform Orders</th><th>M4O Conversion</th><th>Platform Conversion</th></tr></thead>
+        <thead><tr><th>Vendor</th><th>City</th><th>Area</th><th>Segment</th><th>Packs</th><th>Total Impressions</th><th>M4O Orders</th><th>M4O Conversion</th></tr></thead>
         <tbody>
           ${top.map(v => `<tr data-name="${escapeHtml(v.name.toLowerCase())}">
             <td>${escapeHtml(v.name)} ${v.kitchen ? '<span class="badge kit">Kitchen</span>' : ''}</td>
@@ -941,11 +990,9 @@ function renderImpressionConversion(){
             <td>${escapeHtml(v.area)}</td>
             <td><span class="badge seg-${escapeAttr(v.segment)}">${escapeHtml(v.segment)}</span></td>
             <td>${fmt(v.packCount)}</td>
-            <td style="font-family:var(--mono)">${fmt(v.totalImpression)}</td>
+            <td style="font-family:var(--mono)">${fmtCompact(v.totalImpression)}</td>
             <td style="font-family:var(--mono)">${fmt(v.ordersYesterday)}</td>
-            <td style="font-family:var(--mono)">${fmt(v.platformOrdersYesterday)}</td>
             <td style="font-family:var(--mono); color:var(--accent)">${v.conversion !== null ? (v.conversion*100).toFixed(3)+'%' : '<span class="dim">—</span>'}</td>
-            <td style="font-family:var(--mono); color:var(--purple)">${v.platformConversion !== null ? (v.platformConversion*100).toFixed(3)+'%' : '<span class="dim">—</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -1236,10 +1283,13 @@ function renderKitchen(){
             <tr><td>Platform Orders (${win==='yesterday'?'Yesterday':'MTD'})</td><td style="font-family:var(--mono)">${fmt(o[platform])}</td><td style="font-family:var(--mono)">${fmt(nk[platform])}</td></tr>
             <tr><td>M4O Share of Own Platform Orders</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(o[m4oShare])}</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(nk[m4oShare])}</td></tr>
             <tr><td>Share of ALL M4O Orders (project-wide)</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(o[shareOfAll])}</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(nk[shareOfAll])}</td></tr>
+            ${DATA.impression ? `<tr><td>Share of Total Impressions (yesterday)</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.kitchenTotal_pct)}</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.nonKitchenTotal_pct)}</td></tr>` : ''}
+            ${DATA.cpoBudget ? `<tr><td>Total Budget (MTD)</td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.kitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.kitchen.total.totalBudget_pct)})</span></td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.nonKitchen.total.totalBudget_pct)})</span></td></tr>
+            <tr><td>CPO (MTD)</td><td style="font-family:var(--mono); color:var(--accent)">${DATA.cpoBudget.overall.kitchen.total.cpo!==null?tomanCompact(DATA.cpoBudget.overall.kitchen.total.cpo):'<span class="dim">—</span>'}</td><td style="font-family:var(--mono); color:var(--accent)">${DATA.cpoBudget.overall.nonKitchen.total.cpo!==null?tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.cpo):'<span class="dim">—</span>'}</td></tr>` : ''}
           </tbody>
         </table>
       </div>
-      <div class="section-note">"Avg Snapp Discount" for Kitchen is N/A here because Kitchen packs use a structurally different pricing/discount model than regular packs — averaging them together (or even as a separate like-for-like average) isn't a meaningful comparison. See the README for details.</div>
+      <div class="section-note">"Avg Snapp Discount" for Kitchen is N/A here because Kitchen packs use a structurally different pricing/discount model than regular packs — averaging them together (or even as a separate like-for-like average) isn't a meaningful comparison. See the README for details.${!DATA.impression || !DATA.cpoBudget ? ' Impression/Budget rows above need node update_dashboard.js re-run to appear.' : ''}</div>
       <div class="section-title">Kitchen Cities</div>
       <div class="card-grid">
         ${cities.map(([city,v]) => `<div class="list-card" data-action="kt-city" data-city="${escapeAttr(city)}">
@@ -1306,32 +1356,21 @@ function renderKitchen(){
 /* ============================================================
    MODULE: CPO BUDGET (month-to-date, Gregorian month, updated daily)
    ============================================================ */
-function cpoRow(label, m, opts){
-  opts = opts || {};
+const CPO_SEGMENT_COLORS = { Kitchen:'#B389F2', TopCritical:'#FF5A36', Critical:'#F2B84B', Other:'#4C8CFF' };
+
+function cpoRow(label, m){
   return `<tr>
     <td>${escapeHtml(label)}</td>
     <td style="font-family:var(--mono)">${fmt(m.vendorCount)}</td>
-    <td style="font-family:var(--mono)">${toman(m.subsidyBudget)}</td>
-    <td style="font-family:var(--mono)">${toman(m.freeDeliveryBudget)}</td>
-    <td style="font-family:var(--mono); font-weight:600">${toman(m.totalBudget)}</td>
+    <td style="font-family:var(--mono)">${tomanCompact(m.subsidyBudget)}<span class="pct-tag">${pct1(m.subsidyBudget_pct)}</span></td>
+    <td style="font-family:var(--mono)">${tomanCompact(m.freeDeliveryBudget)}<span class="pct-tag">${pct1(m.freeDeliveryBudget_pct)}</span></td>
+    <td style="font-family:var(--mono); font-weight:600">${tomanCompact(m.totalBudget)}<span class="pct-tag">${pct1(m.totalBudget_pct)}</span></td>
     <td style="font-family:var(--mono)">${fmt(m.m4oOrders)}</td>
     <td style="font-family:var(--mono)">${fmt(m.totalSold)}</td>
-    <td style="font-family:var(--mono); color:var(--accent)">${m.cpo!==null ? toman(m.cpo) : '<span class="dim">—</span>'}</td>
-    <td style="font-family:var(--mono); color:var(--seg-b)">${m.freeDeliveryCpo!==null ? toman(m.freeDeliveryCpo) : '<span class="dim">—</span>'}</td>
-    <td style="font-family:var(--mono); color:var(--purple)">${m.subsidyCps!==null ? toman(m.subsidyCps) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--accent)">${m.cpo!==null ? tomanCompact(m.cpo) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--seg-b)">${m.freeDeliveryCpo!==null ? tomanCompact(m.freeDeliveryCpo) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--purple)">${m.subsidyCps!==null ? tomanCompact(m.subsidyCps) : '<span class="dim">—</span>'}</td>
   </tr>`;
-}
-function cpoBreakdownTable(title, note, breakdown, order){
-  const keys = order ? order.filter(k=>breakdown[k]) : Object.keys(breakdown).sort((a,b)=>breakdown[b].totalBudget-breakdown[a].totalBudget);
-  return `
-    <div class="section-title">${title}</div>
-    ${note ? `<div class="section-note">${note}</div>` : ''}
-    <div class="table-wrap" style="margin-bottom:22px">
-      <table>
-        <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
-        <tbody>${keys.map(k => cpoRow(k, breakdown[k])).join('')}</tbody>
-      </table>
-    </div>`;
 }
 
 function renderCpoBudget(){
@@ -1344,34 +1383,39 @@ function renderCpoBudget(){
   if(!d.city){
     const nk = cpo.overall.nonKitchen;
     const kAll = cpo.overall.kitchen.total;
+    const seg = nk.bySegment;
     const cities = Object.entries(cpo.byCity).sort((a,b)=>b[1].totalBudget-a[1].totalBudget);
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">Month-to-date (Gregorian calendar month, updated daily) — same MTD convention as the rest of the dashboard.</div>
+      <div class="section-note">Month-to-date (Gregorian calendar month, updated daily) — same MTD convention as the rest of the dashboard. Every budget figure below shows its share of the total budget next to it.</div>
       <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(cpo.overall.all.totalBudget)}</div></div>
-        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(cpo.overall.all.subsidyBudget)}</div></div>
-        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(cpo.overall.all.freeDeliveryBudget)}</div></div>
-        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cpo.overall.all.cpo!==null?toman(cpo.overall.all.cpo):'—'}</div></div>
-        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cpo.overall.all.freeDeliveryCpo!==null?toman(cpo.overall.all.freeDeliveryCpo):'—'}</div></div>
-        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cpo.overall.all.subsidyCps!==null?toman(cpo.overall.all.subsidyCps):'—'}</div></div>
+        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${tomanCompact(cpo.overall.all.totalBudget)}</div></div>
+        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${tomanCompact(cpo.overall.all.subsidyBudget)}<span class="pct-tag">${pct1(cpo.overall.all.subsidyBudget_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${tomanCompact(cpo.overall.all.freeDeliveryBudget)}<span class="pct-tag">${pct1(cpo.overall.all.freeDeliveryBudget_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cpo.overall.all.cpo!==null?tomanCompact(cpo.overall.all.cpo):'—'}</div></div>
+        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cpo.overall.all.freeDeliveryCpo!==null?tomanCompact(cpo.overall.all.freeDeliveryCpo):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cpo.overall.all.subsidyCps!==null?tomanCompact(cpo.overall.all.subsidyCps):'—'}</div></div>
       </div>
       <div class="section-note">CPO = Total Budget ÷ M4O Orders. Free Delivery CPO = Free Delivery Budget ÷ M4O Orders. Subsidy Cost/Sold = Subsidy Budget ÷ Total Sold (product subsidy is spent per sold unit, not per order, so it isn't a "CPO").</div>
-      ${cpoBreakdownTable('By Vendor Class (Non-Kitchen)', 'Kitchen vendors are excluded here — see the dedicated Kitchen block below — so they don’t distort these segments.', nk.byVendorClass, ['TopCritical','Critical','Important','Ordinary','Unknown'])}
-      ${cpoBreakdownTable('By Vendor Tier (Non-Kitchen)', null, nk.byVendorTier, ['A','B','C','D','Unknown'])}
-      ${cpoBreakdownTable('By New Vendor Class (Non-Kitchen)', null, nk.byNewVendorClass, ['TopCritical','Critical','Others','Unknown'])}
-      <div class="section-title">Kitchen (kept fully separate)</div>
-      <div class="section-note">Kitchen vendors can also be Critical/TopCritical/etc., so mixing them into the segments above would double up — they get their own line instead.</div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>Total Budget by Segment</h3><canvas id="cpoSegmentChart"></canvas></div>
+        <div class="chart-box"><h3>Total Budget by City</h3><canvas id="cpoCityChart"></canvas></div>
+      </div>
+      <div class="section-title">By Segment</div>
+      <div class="section-note">Kitchen vendors have a structurally different cost model, so they're kept as their own line rather than mixed into the Non-Kitchen segments. Non-Kitchen collapses to three buckets: Top Critical, Critical, and Other (Important + Ordinary).</div>
       <div class="table-wrap" style="margin-bottom:22px">
         <table>
           <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
           <tbody>
+            ${cpoRow('Top Critical', seg.TopCritical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
+            ${cpoRow('Critical', seg.Critical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
+            ${cpoRow('Other (Important + Ordinary)', seg.Other || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
             ${cpoRow('Non-Kitchen (all)', nk.total)}
             ${cpoRow('Kitchen', kAll)}
           </tbody>
         </table>
       </div>
-      <div class="section-title">Cities</div>
+      <div class="section-title">Cities &amp; Marketing Areas</div>
       <div class="card-grid">
         ${cities.map(([city,v]) => cpoCityCard(city,v)).join('')}
       </div>`;
@@ -1383,12 +1427,12 @@ function renderCpoBudget(){
     return `
       ${breadcrumb(['All Cities', d.city], ['cpo-city-null', null])}
       <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(cdata.totalBudget)}</div></div>
-        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(cdata.subsidyBudget)}</div></div>
-        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(cdata.freeDeliveryBudget)}</div></div>
-        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cdata.cpo!==null?toman(cdata.cpo):'—'}</div></div>
-        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cdata.freeDeliveryCpo!==null?toman(cdata.freeDeliveryCpo):'—'}</div></div>
-        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cdata.subsidyCps!==null?toman(cdata.subsidyCps):'—'}</div></div>
+        <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${tomanCompact(cdata.totalBudget)}<span class="pct-tag">${pct1(cdata.totalBudget_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${tomanCompact(cdata.subsidyBudget)}<span class="pct-tag">${pct1(cdata.subsidyBudget_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${tomanCompact(cdata.freeDeliveryBudget)}<span class="pct-tag">${pct1(cdata.freeDeliveryBudget_pct)}</span></div></div>
+        <div class="stat-card"><div class="label">CPO</div><div class="value small">${cdata.cpo!==null?tomanCompact(cdata.cpo):'—'}</div></div>
+        <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cdata.freeDeliveryCpo!==null?tomanCompact(cdata.freeDeliveryCpo):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cdata.subsidyCps!==null?tomanCompact(cdata.subsidyCps):'—'}</div></div>
       </div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
       <div class="card-grid">
@@ -1401,10 +1445,10 @@ function renderCpoBudget(){
   return `
     ${breadcrumb(['All Cities', d.city, d.area], ['cpo-city-null', 'cpo-area-null', null])}
     <div class="stat-row">
-      <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${toman(adata.totalBudget)}</div></div>
-      <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${toman(adata.subsidyBudget)}</div></div>
-      <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${toman(adata.freeDeliveryBudget)}</div></div>
-      <div class="stat-card"><div class="label">CPO</div><div class="value small">${adata.cpo!==null?toman(adata.cpo):'—'}</div></div>
+      <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${tomanCompact(adata.totalBudget)}<span class="pct-tag">${pct1(adata.totalBudget_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${tomanCompact(adata.subsidyBudget)}<span class="pct-tag">${pct1(adata.subsidyBudget_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${tomanCompact(adata.freeDeliveryBudget)}<span class="pct-tag">${pct1(adata.freeDeliveryBudget_pct)}</span></div></div>
+      <div class="stat-card"><div class="label">CPO</div><div class="value small">${adata.cpo!==null?tomanCompact(adata.cpo):'—'}</div></div>
     </div>
     <input class="search-box" id="cpoVendorSearch" placeholder="Filter vendors by name…">
     <div class="table-wrap">
@@ -1419,10 +1463,10 @@ function renderCpoBudget(){
             <td>${v.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${fmt(v.m4oOrders)}</td>
             <td style="font-family:var(--mono)">${fmt(v.totalSold)}</td>
-            <td style="font-family:var(--mono); font-weight:600">${toman(v.totalBudget)}</td>
-            <td style="font-family:var(--mono); color:var(--accent)">${v.cpo!==null?toman(v.cpo):'<span class="dim">—</span>'}</td>
-            <td style="font-family:var(--mono); color:var(--seg-b)">${v.freeDeliveryCpo!==null?toman(v.freeDeliveryCpo):'<span class="dim">—</span>'}</td>
-            <td style="font-family:var(--mono); color:var(--purple)">${v.subsidyCps!==null?toman(v.subsidyCps):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); font-weight:600">${tomanCompact(v.totalBudget)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${v.cpo!==null?tomanCompact(v.cpo):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${v.freeDeliveryCpo!==null?tomanCompact(v.freeDeliveryCpo):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${v.subsidyCps!==null?tomanCompact(v.subsidyCps):'<span class="dim">—</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -1432,18 +1476,18 @@ function renderCpoBudget(){
 function cpoCityCard(city, v){
   return `<div class="list-card" data-action="cpo-city" data-city="${escapeAttr(city)}">
     <div class="name">${escapeHtml(city)}</div>
-    <div class="row"><span>Total budget</span><b>${toman(v.totalBudget)}</b></div>
+    <div class="row"><span>Total budget</span><b>${tomanCompact(v.totalBudget)}<span class="pct">${pct1(v.totalBudget_pct)}</span></b></div>
     <div class="row"><span>M4O orders</span><b>${fmt(v.m4oOrders)}</b></div>
-    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?toman(v.cpo):'—'}</b></div>
+    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?tomanCompact(v.cpo):'—'}</b></div>
     <div class="row"><span>Vendors</span><b>${fmt(v.vendorCount)}</b></div>
   </div>`;
 }
 function cpoAreaCard(area, v){
   return `<div class="list-card" data-action="cpo-area" data-area="${escapeAttr(area)}">
     <div class="name">${escapeHtml(area)}</div>
-    <div class="row"><span>Total budget</span><b>${toman(v.totalBudget)}</b></div>
+    <div class="row"><span>Total budget</span><b>${tomanCompact(v.totalBudget)}<span class="pct">${pct1(v.totalBudget_pct)}</span></b></div>
     <div class="row"><span>M4O orders</span><b>${fmt(v.m4oOrders)}</b></div>
-    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?toman(v.cpo):'—'}</b></div>
+    <div class="row"><span>CPO</span><b style="color:var(--accent)">${v.cpo!==null?tomanCompact(v.cpo):'—'}</b></div>
   </div>`;
 }
 
@@ -1741,13 +1785,32 @@ function drawCharts(){
           options:{ plugins:{legend:{display:false}}, scales:{ x:{ grid:{display:false}, ticks:{ maxTicksLimit:8 } }, y:{grid:{color:gridColor}} } }
         });
       }
-      const ctx2 = document.getElementById('impPeriodChart');
+    }
+  }
+
+  if(currentPanel === 'cpoBudget' && !drill.cpoBudget.city){
+    const cpo = DATA.cpoBudget;
+    if(cpo){
+      const nk = cpo.overall.nonKitchen;
+      const seg = nk.bySegment;
+      const ctx1 = document.getElementById('cpoSegmentChart');
+      if(ctx1){
+        const labels = ['Top Critical','Critical','Other','Kitchen'];
+        const values = [seg.TopCritical, seg.Critical, seg.Other, cpo.overall.kitchen.total].map(m => m ? m.totalBudget : 0);
+        const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other, CPO_SEGMENT_COLORS.Kitchen];
+        charts.cpoSegmentChart = new Chart(ctx1, {
+          type:'doughnut',
+          data:{ labels, datasets:[{ data: values, backgroundColor: colors, borderWidth:0 }]},
+          options:{ plugins:{ legend:{ position:'right', labels:{ boxWidth:10, padding:12 } } } }
+        });
+      }
+      const ctx2 = document.getElementById('cpoCityChart');
       if(ctx2){
-        const periods = imp.periods;
-        charts.impPeriodChart = new Chart(ctx2, {
+        const top = Object.entries(cpo.byCity).map(([c,v])=>[c,v.totalBudget]).sort((a,b)=>b[1]-a[1]).slice(0,8);
+        charts.cpoCityChart = new Chart(ctx2, {
           type:'bar',
-          data:{ labels: periods.map(p=>p.label), datasets:[{ data: periods.map(p=>block.byPeriod[p.key]||0), backgroundColor: periods.map(p=>PERIOD_COLORS[p.key]), borderRadius:4 }]},
-          options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:gridColor}} } }
+          data:{ labels: top.map(([c])=>c), datasets:[{ data: top.map(([,t])=>t), backgroundColor:'#FF5A36', borderRadius:4 }]},
+          options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:gridColor}, ticks:{ callback:(v)=>fmtCompact(v) }}, y:{grid:{display:false}} } }
         });
       }
     }
