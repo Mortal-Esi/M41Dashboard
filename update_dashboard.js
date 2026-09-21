@@ -28,11 +28,13 @@ const { google } = require('googleapis');
 // CONFIG — edit these lines
 // ============================================================
 const SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'service-account.json');
-// Env vars take priority (used by the GitHub Actions scheduled refresh, via
-// repo Secrets — see .github/workflows/refresh-dashboard.yml) — falls back
-// to the hardcoded value below for local/manual runs.
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/Order/TopCritical/BI)
-const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
+// Real spreadsheet IDs live in config.local.js (gitignored, never committed —
+// see config.local.js.example) so this file never needs local edits that
+// would conflict with git. Env vars, if set, take priority over that.
+let LOCAL_CONFIG = {};
+try { LOCAL_CONFIG = require('./config.local.js'); } catch (e) { /* no config.local.js yet — fine, falls through below */ }
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/Order/TopCritical/BI)
+const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
 
 const SHEET_NAMES = {
   mainData: 'MainData',

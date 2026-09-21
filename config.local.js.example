@@ -1,0 +1,17 @@
+/**
+ * config.local.js.example
+ * ------------------------
+ * Copy this file to `config.local.js` (same folder) and set your real
+ * Google Sheet IDs below. `config.local.js` is gitignored and never
+ * committed — this keeps update_dashboard.js itself free of local edits
+ * that would otherwise conflict with git every time you pull/push.
+ *
+ *   cp config.local.js.example config.local.js
+ *
+ * Then edit config.local.js and paste in the real IDs, from each sheet's
+ * URL: https://docs.google.com/spreadsheets/d/[SPREADSHEET_ID]/edit
+ */
+module.exports = {
+  SPREADSHEET_ID: 'PASTE_YOUR_SPREADSHEET_ID_HERE',
+  COVERAGE_SPREADSHEET_ID: 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE',
+};
