@@ -68,7 +68,7 @@
   .stat-card .value{ font-size:24px; font-weight:600; font-family:var(--mono); }
   .stat-card .value.small{ font-size:17px; }
   .stat-card .sub{ font-size:11px; color:var(--text-dim); margin-top:4px; }
-  .stat-card .pct-tag{ font-size:11px; color:var(--text-faint); font-family:var(--mono); margin-left:4px; }
+  .pct-tag{ font-size:11px; color:var(--text-faint); font-family:var(--mono); margin-left:4px; }
   .stat-card.accent .value{ color:var(--accent); }
   .stat-card.seg-a .value{ color:var(--seg-a); }
   .stat-card.seg-b .value{ color:var(--seg-b); }
@@ -1330,6 +1330,26 @@ function renderOrderShare(){
       <div class="stat-card"><div class="label">Packs Unordered</div><div class="value small">${fmt(orderedP.unordered)}<span class="pct-tag">${pct1(orderedP.unordered_pct)}</span></div></div>
     </div>
     <div class="section-note">A pack is "ordered" if its vendor received at least one Meal4One order in the selected window. (Ordered/Unordered totals are not affected by the Vendor Type filter.)</div>
+    ${os.byVendorType ? `
+    <div class="section-title">M4O Orders by Vendor Type</div>
+    <div class="section-note">Source: the main data sheet's per-vendor order columns, which cover every vendor type — unlike the Order sheet above (Restaurant only), which is why the rest of this tab has no Cafe/Juice/Non-Food breakdown. There's no platform order total for these types here, so only M4O order counts are shown, not a market-share %.</div>
+    <div class="table-wrap" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>Vendor Type</th><th>Vendors</th><th>Ordered Vendors (MTD)</th><th>M4O Orders (Yesterday)</th><th>M4O Orders (MTD)</th></tr></thead>
+        <tbody>
+          ${['Restaurant','Cafe','Juice','Non-Food'].filter(t => os.byVendorType[t]).map(t => {
+            const v = os.byVendorType[t];
+            return `<tr>
+            <td>${escapeHtml(t)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.orderedVendorCount)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.ordersYesterday)}</td>
+            <td style="font-family:var(--mono); font-weight:600">${fmt(v.ordersMtd)}</td>
+          </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
     <div class="chart-row">
       <div class="chart-box"><h3>M4O Orders by City</h3><canvas id="m41ByCityChart"></canvas></div>
       <div class="chart-box"><h3>M4O Share of Own Platform Orders, by City</h3><canvas id="shareByCityChart"></canvas></div>
@@ -1989,10 +2009,19 @@ function drawCharts(){
         const labels = ['Top Critical','Critical','Other','Kitchen'];
         const values = [seg.TopCritical, seg.Critical, seg.Other, cpo.overall.kitchen.total].map(m => m ? m.totalBudget : 0);
         const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other, CPO_SEGMENT_COLORS.Kitchen];
+        const segTotal = values.reduce((a,b)=>a+b,0);
         charts.cpoSegmentChart = new Chart(ctx1, {
           type:'doughnut',
           data:{ labels, datasets:[{ data: values, backgroundColor: colors, borderWidth:0 }]},
-          options:{ plugins:{ legend:{ position:'right', labels:{ boxWidth:10, padding:12 } } } }
+          options:{ plugins:{
+            legend:{ position:'right', labels:{ boxWidth:10, padding:12,
+              generateLabels:(chart)=> chart.data.labels.map((label,i)=>({
+                text:`${label} (${segTotal?pct1(values[i]/segTotal*100):'0.0%'})`,
+                fillStyle: colors[i], strokeStyle: colors[i], index:i,
+              })),
+            } },
+            tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${segTotal?pct1(values[c.dataIndex]/segTotal*100):'0.0%'}` } },
+          } }
         });
       }
       const ctx2 = document.getElementById('cpoCityChart');
