@@ -953,13 +953,14 @@ async function main() {
     const totalBudget = rows.reduce((s, r) => s + r.totalBudget, 0);
     const m4oOrders = rows.reduce((s, r) => s + r.m4oOrders, 0);
     const totalSold = rows.reduce((s, r) => s + r.totalSold, 0);
-    const ref = refs || { totalBudget, subsidyBudget, freeDeliveryBudget };
+    const ref = refs || { totalBudget, subsidyBudget, freeDeliveryBudget, m4oOrders };
     return {
       vendorCount: rows.length,
       subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
       subsidyBudget_pct: pct(subsidyBudget, ref.subsidyBudget),
       freeDeliveryBudget_pct: pct(freeDeliveryBudget, ref.freeDeliveryBudget),
       totalBudget_pct: pct(totalBudget, ref.totalBudget),
+      m4oOrders_pct: pct(m4oOrders, ref.m4oOrders),
       cpo: m4oOrders ? totalBudget / m4oOrders : null,
       freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
       subsidyCps: totalSold ? subsidyBudget / totalSold : null,
@@ -973,7 +974,7 @@ async function main() {
     };
   }
   const grandTotalRefs = cpoMetrics(cpoVendors); // self-referential: 100% of itself
-  const cpoRefs = { totalBudget: grandTotalRefs.totalBudget, subsidyBudget: grandTotalRefs.subsidyBudget, freeDeliveryBudget: grandTotalRefs.freeDeliveryBudget };
+  const cpoRefs = { totalBudget: grandTotalRefs.totalBudget, subsidyBudget: grandTotalRefs.subsidyBudget, freeDeliveryBudget: grandTotalRefs.freeDeliveryBudget, m4oOrders: grandTotalRefs.m4oOrders };
 
   const nonKitchenCpoVendors = cpoVendors.filter((v) => !v.kitchen);
   const kitchenCpoVendors = cpoVendors.filter((v) => v.kitchen);
