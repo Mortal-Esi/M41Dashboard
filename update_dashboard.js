@@ -606,6 +606,41 @@ async function main() {
     },
   };
 
+  // ---- M4O orders by vendor type, from MainData's vendor_m41_Orders_Yesterday/MTD
+  // columns (added alongside the pack rows — same value repeats on every pack
+  // row of a vendor, so dedupe by VendorID). The Order sheet above is
+  // Restaurant-only (SuperTypeID 1), so it has no rows at all for Cafe/Juice/
+  // Non-Food vendors; these two columns are the only order-count source that
+  // covers every vendor type. There's no platform-order total for them here,
+  // so only M4O order counts are available — no market-share %.
+  function superTypeLabel(id) {
+    if (id === 1) return 'Restaurant';
+    if (id === 2) return 'Cafe';
+    if (id === 3) return 'Juice';
+    return 'Non-Food';
+  }
+  const vendorM41OrderMap = new Map();
+  for (const r of df) {
+    const vid = String(r.VendorID);
+    if (!vendorM41OrderMap.has(vid)) {
+      vendorM41OrderMap.set(vid, {
+        superTypeId: toNum(r.SuperTypeID, null),
+        ordersYesterday: toNum(r.vendor_m41_Orders_Yesterday, 0),
+        ordersMtd: toNum(r.vendor_m41_Orders_MTD, 0),
+      });
+    }
+  }
+  const orderShareByVendorType = {};
+  for (const v of vendorM41OrderMap.values()) {
+    const label = superTypeLabel(v.superTypeId);
+    if (!orderShareByVendorType[label]) orderShareByVendorType[label] = { vendorCount: 0, orderedVendorCount: 0, ordersYesterday: 0, ordersMtd: 0 };
+    const bucket = orderShareByVendorType[label];
+    bucket.vendorCount += 1;
+    if (v.ordersMtd > 0) bucket.orderedVendorCount += 1;
+    bucket.ordersYesterday += v.ordersYesterday;
+    bucket.ordersMtd += v.ordersMtd;
+  }
+
   // ---- TopCritical engagement: numerator = TopCritical vendors with NewMonthM41VO>0 (MTD) ----
   const topcMatched = orderRaw.filter((r) => topcIds.has(String(r.VendorID)));
   const engagedIds = new Set(topcMatched.filter((r) => toNum(r.NewMonthM41VO, 0) > 0).map((r) => String(r.VendorID)));
@@ -943,10 +978,12 @@ async function main() {
     totalSold: toNum(r.TotalSold, 0),
   }));
 
-  // Every budget figure also carries its % of the project-wide grand total for
-  // that same metric (totalBudget_pct, subsidyBudget_pct, freeDeliveryBudget_pct)
-  // — a raw Toman number alone doesn't say whether a city/segment is 2% or 40%
-  // of spend, so refs (the grand totals) are threaded through every breakdown.
+  // Every budget figure also carries its % of the project-wide grand TOTAL
+  // BUDGET (totalBudget_pct, subsidyBudget_pct, freeDeliveryBudget_pct all
+  // share the same ref.totalBudget denominator) — a raw Toman number alone
+  // doesn't say whether a city/segment is 2% or 40% of spend, so refs (the
+  // grand totals) are threaded through every breakdown. m4oOrders_pct is the
+  // one exception: it's share of total M4O ORDERS, not budget.
   function cpoMetrics(rows, refs) {
     const subsidyBudget = rows.reduce((s, r) => s + r.subsidyBudget, 0);
     const freeDeliveryBudget = rows.reduce((s, r) => s + r.freeDeliveryBudget, 0);
@@ -957,8 +994,8 @@ async function main() {
     return {
       vendorCount: rows.length,
       subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
-      subsidyBudget_pct: pct(subsidyBudget, ref.subsidyBudget),
-      freeDeliveryBudget_pct: pct(freeDeliveryBudget, ref.freeDeliveryBudget),
+      subsidyBudget_pct: pct(subsidyBudget, ref.totalBudget),
+      freeDeliveryBudget_pct: pct(freeDeliveryBudget, ref.totalBudget),
       totalBudget_pct: pct(totalBudget, ref.totalBudget),
       m4oOrders_pct: pct(m4oOrders, ref.m4oOrders),
       cpo: m4oOrders ? totalBudget / m4oOrders : null,
@@ -1031,6 +1068,7 @@ async function main() {
       orderedVendorsPct,
       orderedPacksPct,
       byCity: orderShareByCity,
+      byVendorType: orderShareByVendorType,
     },
     topCriticalEngagement,
     kitchen: kitchenModule,
