@@ -1271,6 +1271,44 @@ function renderRating(){
 /* ============================================================
    MODULE 4: ORDER SHARE & ENGAGEMENT
    ============================================================ */
+function renderOrderShareByVendorTypeOnly(label){
+  const os = DATA.orderShare;
+  const vt = os.byVendorType && os.byVendorType[label];
+  if(!vt){
+    return `<div class="empty-state">No order data available for ${escapeHtml(label)} vendors. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
+  }
+  const orders = orderWindow === 'yesterday' ? 'ordersYesterday' : 'ordersMtd';
+  const cities = Object.entries(vt.byCity || {}).sort((a,b)=> b[1][orders] - a[1][orders]);
+  return `
+    <div class="flex-between">
+      <div class="breadcrumb" style="margin-bottom:0">Order share window</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${orderWindow==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
+        <div class="toggle-btn ${orderWindow==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
+      </div>
+    </div>
+    <div class="section-note">The Order sheet that powers the rest of this tab (platform-order totals, market share) only covers Restaurant vendors. For ${escapeHtml(label)}, the M4O order counts below come from the main data sheet instead — there's no platform-order total for this type there, so a market-share % isn't available (not a bug — the source sheet just doesn't have it yet).</div>
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">${escapeHtml(label)} Vendors</div><div class="value">${fmt(vt.vendorCount)}</div></div>
+      <div class="stat-card seg-a"><div class="label">Ordered This Month</div><div class="value small">${fmt(vt.orderedVendorCount)}<span class="pct-tag">${pct1(vt.vendorCount ? vt.orderedVendorCount/vt.vendorCount*100 : 0)}</span></div></div>
+      <div class="stat-card"><div class="label">M4O Orders (Yesterday)</div><div class="value">${fmt(vt.ordersYesterday)}</div></div>
+      <div class="stat-card accent"><div class="label">M4O Orders (MTD)</div><div class="value">${fmt(vt.ordersMtd)}</div></div>
+    </div>
+    <div class="section-title">Cities (${orderWindow === 'yesterday' ? 'Yesterday' : 'Month to Date'})</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>City</th><th>Vendors</th><th>M4O Orders</th></tr></thead>
+        <tbody>
+          ${cities.map(([city,v]) => `<tr>
+            <td>${escapeHtml(city)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
+            <td style="font-family:var(--mono); font-weight:600">${fmt(v[orders])}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 function renderOrderShare(){
   const os = DATA.orderShare;
   const filtered = superTypeFilter !== 'all';
@@ -1278,6 +1316,16 @@ function renderOrderShare(){
   const orderedV = os.orderedVendorsPct[orderWindow];
   const orderedP = os.orderedPacksPct[orderWindow];
   const d = drill.orderShare;
+
+  // The Order sheet backing this tab's stats/cities table below only has
+  // Restaurant (SuperTypeID 1) rows — filtering to Cafe/Juice/Non-Food would
+  // otherwise show real-looking zeros instead of "no data here". Route those
+  // filters to the MainData-sourced M4O Orders by Vendor Type breakdown,
+  // which is the only order-count source covering every vendor type.
+  const activeGroup = filtered ? superTypeGroups().find(g => g.key === superTypeFilter) : null;
+  if(activeGroup && !activeGroup.ids.includes(1)){
+    return renderOrderShareByVendorTypeOnly(activeGroup.label);
+  }
 
   let overall, cities;
   if(!filtered){

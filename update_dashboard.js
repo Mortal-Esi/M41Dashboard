@@ -625,6 +625,7 @@ async function main() {
     if (!vendorM41OrderMap.has(vid)) {
       vendorM41OrderMap.set(vid, {
         superTypeId: toNum(r.SuperTypeID, null),
+        city: r.City,
         ordersYesterday: toNum(r.vendor_m41_Orders_Yesterday, 0),
         ordersMtd: toNum(r.vendor_m41_Orders_MTD, 0),
       });
@@ -633,12 +634,16 @@ async function main() {
   const orderShareByVendorType = {};
   for (const v of vendorM41OrderMap.values()) {
     const label = superTypeLabel(v.superTypeId);
-    if (!orderShareByVendorType[label]) orderShareByVendorType[label] = { vendorCount: 0, orderedVendorCount: 0, ordersYesterday: 0, ordersMtd: 0 };
+    if (!orderShareByVendorType[label]) orderShareByVendorType[label] = { vendorCount: 0, orderedVendorCount: 0, ordersYesterday: 0, ordersMtd: 0, byCity: {} };
     const bucket = orderShareByVendorType[label];
     bucket.vendorCount += 1;
     if (v.ordersMtd > 0) bucket.orderedVendorCount += 1;
     bucket.ordersYesterday += v.ordersYesterday;
     bucket.ordersMtd += v.ordersMtd;
+    if (!bucket.byCity[v.city]) bucket.byCity[v.city] = { vendorCount: 0, ordersYesterday: 0, ordersMtd: 0 };
+    bucket.byCity[v.city].vendorCount += 1;
+    bucket.byCity[v.city].ordersYesterday += v.ordersYesterday;
+    bucket.byCity[v.city].ordersMtd += v.ordersMtd;
   }
 
   // ---- TopCritical engagement: numerator = TopCritical vendors with NewMonthM41VO>0 (MTD) ----
