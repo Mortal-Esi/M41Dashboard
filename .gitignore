@@ -8,3 +8,8 @@ coverage_model_snapshot.json
 # The real dashboard password must NEVER be committed either — it lives only
 # in this local file (see password.local.js.example for the template).
 password.local.js
+
+# Real Google Sheet IDs — kept out of the tracked update_dashboard.js so that
+# file never has local-only edits that conflict with git (see
+# config.local.js.example for the template).
+config.local.js
