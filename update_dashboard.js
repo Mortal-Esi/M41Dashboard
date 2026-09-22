@@ -33,8 +33,9 @@ const SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'service-account.json');
 // would conflict with git. Env vars, if set, take priority over that.
 let LOCAL_CONFIG = {};
 try { LOCAL_CONFIG = require('./config.local.js'); } catch (e) { /* no config.local.js yet — fine, falls through below */ }
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/Order/TopCritical/BI)
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/MotherVendors/TC Eng/BI)
 const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
+const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
 
 const SHEET_NAMES = {
   mainData: 'MainData',
@@ -80,6 +81,11 @@ async function fetchSheetAsObjects(sheets, spreadsheetId, sheetName) {
     headers.forEach((h, i) => { obj[h] = row[i] === undefined ? null : row[i]; });
     return obj;
   });
+}
+
+async function listSheetTitles(sheets, spreadsheetId) {
+  const res = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
+  return (res.data.sheets || []).map((s) => s.properties.title);
 }
 
 // ============================================================
@@ -232,6 +238,74 @@ function packStatsBlock(rows) {
 }
 
 // ============================================================
+// DELIVERY RADIUS (separate Google Sheet, one tab per day named
+// YYYY-MM-DD, each with its own set of Distance_HHMM snapshot columns —
+// the snapshot times aren't on a fixed schedule, so the time axis is
+// read from whichever columns that day's tab actually has). Only the
+// most recent date tab is used, matching the "yesterday" convention the
+// rest of the dashboard uses for daily figures.
+// ============================================================
+function buildDeliveryModule(rows, date) {
+  if (rows.length === 0) return null;
+  const distanceCols = Object.keys(rows[0])
+    .filter((h) => /^Distance_\d{3,4}$/.test(h))
+    .map((h) => {
+      const digits = h.slice('Distance_'.length).padStart(4, '0');
+      return { col: h, time: `${digits.slice(0, 2)}:${digits.slice(2, 4)}`, sortKey: Number(digits) };
+    })
+    .sort((a, b) => a.sortKey - b.sortKey);
+  if (distanceCols.length === 0) return null;
+
+  // "Maximum radius that shows M4O vendors" — per vendor per timestamp, take
+  // the max across that vendor's pack rows. The same value repeats across a
+  // vendor's packs almost always; a blank just means that pack wasn't live
+  // at that snapshot (excluded, not treated as 0), and the rare genuine
+  // pack-level difference is resolved by taking the max, per the metric's
+  // own name.
+  const vendorMap = new Map();
+  for (const r of rows) {
+    const vid = String(r.VendorID);
+    if (!vendorMap.has(vid)) {
+      vendorMap.set(vid, { id: r.VendorID, name: r.VendorTitle, city: r.City, area: r.MarketingAreaName, byTime: new Map() });
+    }
+    const entry = vendorMap.get(vid);
+    for (const { col, time } of distanceCols) {
+      const n = toNum(r[col], null);
+      if (n === null) continue;
+      const existing = entry.byTime.get(time);
+      if (existing === undefined || n > existing) entry.byTime.set(time, n);
+    }
+  }
+  const vendors = [...vendorMap.values()].map((v) => ({
+    id: v.id, name: v.name, city: v.city, area: v.area,
+    byTime: distanceCols.map(({ time }) => (v.byTime.has(time) ? Math.round(v.byTime.get(time) * 1000) / 1000 : null)),
+  }));
+
+  function avgByTimeAgg(vendorList) {
+    return distanceCols.map((_, i) => {
+      const vals = vendorList.map((v) => v.byTime[i]).filter((x) => x !== null);
+      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 1000) / 1000 : null;
+    });
+  }
+
+  const byCity = {};
+  for (const [city, cVendors] of groupBy(vendors, (v) => v.city)) {
+    const areas = {};
+    for (const [area, aVendors] of groupBy(cVendors, (v) => v.area)) {
+      areas[area] = { vendorCount: aVendors.length, avgByTime: avgByTimeAgg(aVendors), vendors: aVendors };
+    }
+    byCity[city] = { vendorCount: cVendors.length, avgByTime: avgByTimeAgg(cVendors), areas };
+  }
+
+  return {
+    date,
+    timeSlots: distanceCols.map((c) => c.time),
+    overall: { vendorCount: vendors.length, avgByTime: avgByTimeAgg(vendors) },
+    byCity,
+  };
+}
+
+// ============================================================
 // MAIN PIPELINE
 // ============================================================
 async function main() {
@@ -289,6 +363,27 @@ async function main() {
   ]);
   console.log(`  CityCoverage: ${cityCoverageRaw.length} rows`);
   console.log(`  CoverageResult: ${coverageResultRaw.length} rows`);
+
+  console.log('Fetching Delivery radius snapshots…');
+  let deliveryModule = null;
+  try {
+    if (DELIVERY_SPREADSHEET_ID === 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE') {
+      console.log('  Skipped — DELIVERY_SPREADSHEET_ID not configured yet (see config.local.js.example).');
+    } else {
+      const deliveryTitles = await listSheetTitles(sheets, DELIVERY_SPREADSHEET_ID);
+      const deliveryDateTabs = deliveryTitles.filter((t) => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort();
+      if (deliveryDateTabs.length === 0) {
+        console.log('  Skipped — no date-named tabs (YYYY-MM-DD) found in the Delivery sheet.');
+      } else {
+        const latestDeliveryDate = deliveryDateTabs[deliveryDateTabs.length - 1];
+        const deliveryRaw = await fetchSheetAsObjects(sheets, DELIVERY_SPREADSHEET_ID, latestDeliveryDate);
+        console.log(`  Delivery (${latestDeliveryDate}): ${deliveryRaw.length} rows`);
+        deliveryModule = buildDeliveryModule(deliveryRaw, latestDeliveryDate);
+      }
+    }
+  } catch (err) {
+    console.log(`  Skipped — could not read the Delivery sheet (${err.message}). Share it with the service account as Viewer and set DELIVERY_SPREADSHEET_ID in config.local.js.`);
+  }
 
   // ---- FILTER RULE: Activity==1, OR PO>0, OR the pack has impressions ----
   // (Activity==0/PO==0 packs that still got impressions were seen by users —
@@ -1136,6 +1231,7 @@ async function main() {
     coverageModel,
     impression: impressionModule,
     cpoBudget: cpoBudgetModule,
+    delivery: deliveryModule,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');

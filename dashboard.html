@@ -200,6 +200,7 @@
   <div class="tab" data-panel="kitchen">Kitchen</div>
   <div class="tab" data-panel="cpoBudget">CPO Budget</div>
   <div class="tab" data-panel="coverageModel">Coverage Model</div>
+  <div class="tab" data-panel="delivery">Delivery</div>
 </div>
 
 <div id="filterBarHost"></div>
@@ -214,7 +215,7 @@
    ============================================================ */
 let DATA = null;
 let currentPanel = 'overview';
-let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null} };
+let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null} };
 let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion'
 let orderWindow = 'mtd';
 let superTypeFilter = 'all'; // 'all' or a group key from SUPER_TYPE_GROUPS
@@ -399,6 +400,7 @@ function render(){
   else if(currentPanel === 'kitchen') root.innerHTML = renderKitchen();
   else if(currentPanel === 'cpoBudget') root.innerHTML = renderCpoBudget();
   else if(currentPanel === 'coverageModel') root.innerHTML = renderCoverageModel();
+  else if(currentPanel === 'delivery') root.innerHTML = renderDelivery();
   attachHandlers();
 }
 
@@ -1851,6 +1853,126 @@ function progressRow(label, value, color){
 }
 
 /* ============================================================
+   MODULE: DELIVERY (avg. M4O visibility radius by hour, latest day)
+   ============================================================ */
+function renderDelivery(){
+  const dl = DATA.delivery;
+  if(!dl){
+    return `<div class="empty-state">No Delivery data available. Set DELIVERY_SPREADSHEET_ID in config.local.js, share the sheet with the service account, then re-run <code>node update_dashboard.js</code>.</div>`;
+  }
+  const d = drill.delivery;
+
+  if(!d.city){
+    const cities = Object.entries(dl.byCity).sort((a,b)=> b[1].vendorCount - a[1].vendorCount);
+    return `
+      ${breadcrumb(['All Cities'])}
+      <div class="section-note">Maximum radius (km) at which Meal4One vendors were shown to users, snapshotted through the day on ${escapeHtml(dl.date)} — the most recent day available. Averaged across vendors at each snapshot time.</div>
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(dl.overall.vendorCount)}</div></div>
+        <div class="stat-card"><div class="label">Snapshot Times</div><div class="value small">${dl.timeSlots.length}</div></div>
+        <div class="stat-card"><div class="label">Date</div><div class="value small">${escapeHtml(dl.date)}</div></div>
+      </div>
+      <div class="chart-box"><h3>Average Radius by Hour — All Cities</h3><canvas id="deliveryTimeChart"></canvas></div>
+      <div class="section-title">Cities (${cities.length})</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>City</th><th>Vendors</th><th>Avg Radius (last snapshot)</th></tr></thead>
+          <tbody>
+            ${cities.map(([city,v]) => {
+              const last = [...v.avgByTime].reverse().find(x => x !== null);
+              return `<tr class="clickable" data-action="dl-city" data-city="${escapeAttr(city)}">
+              <td>${escapeHtml(city)}</td>
+              <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
+              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
+            </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  const cdata = dl.byCity[d.city];
+  if(!cdata){
+    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.city)}.</div>`;
+  }
+
+  if(!d.area){
+    const areas = Object.entries(cdata.areas).sort((a,b)=> b[1].vendorCount - a[1].vendorCount);
+    return `
+      ${breadcrumb(['All Cities', d.city], ['dl-city-null'])}
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(cdata.vendorCount)}</div></div>
+      </div>
+      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.city)}</h3><canvas id="deliveryTimeChart"></canvas></div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Vendors</th><th>Avg Radius (last snapshot)</th></tr></thead>
+          <tbody>
+            ${areas.map(([area,v]) => {
+              const last = [...v.avgByTime].reverse().find(x => x !== null);
+              return `<tr class="clickable" data-action="dl-area" data-area="${escapeAttr(area)}">
+              <td>${escapeHtml(area)}</td>
+              <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
+              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
+            </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  const adata = cdata.areas[d.area];
+  if(!adata){
+    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.area)}.</div>`;
+  }
+
+  if(!d.vendorId){
+    const vendors = [...adata.vendors].sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    return `
+      ${breadcrumb(['All Cities', d.city, d.area], ['dl-city-null', 'dl-area-null'])}
+      <div class="stat-row">
+        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(adata.vendorCount)}</div></div>
+      </div>
+      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.area)}</h3><canvas id="deliveryTimeChart"></canvas></div>
+      <input class="search-box" id="deliveryVendorSearch" placeholder="Filter vendors by name…">
+      <div class="table-wrap">
+        <table id="deliveryVendorTable">
+          <thead><tr><th>Vendor</th><th>Avg Radius (last snapshot)</th></tr></thead>
+          <tbody>
+            ${vendors.map(v => {
+              const last = [...v.byTime].reverse().find(x => x !== null);
+              return `<tr class="clickable" data-name="${escapeHtml((v.name||'').toLowerCase())}" data-action="dl-vendor" data-vendor-id="${escapeAttr(v.id)}">
+              <td>${escapeHtml(v.name || 'Unknown')}</td>
+              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
+            </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  const vendor = adata.vendors.find(v => String(v.id) === String(d.vendorId));
+  if(!vendor){
+    return `<div class="empty-state">Vendor not found.</div>`;
+  }
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area, vendor.name || 'Vendor'], ['dl-city-null', 'dl-area-null', 'dl-vendor-null'])}
+    <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(vendor.name || 'Vendor')}</h3><canvas id="deliveryTimeChart"></canvas></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Radius</th></tr></thead>
+        <tbody>
+          ${dl.timeSlots.map((t,i) => `<tr>
+            <td>${escapeHtml(t)}</td>
+            <td style="font-family:var(--mono)">${vendor.byTime[i]!==null?vendor.byTime[i].toFixed(2)+' km':'<span class="dim">—</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/* ============================================================
    HANDLERS + BREADCRUMB
    ============================================================ */
 function breadcrumb(labels, actions){
@@ -1913,6 +2035,15 @@ function attachHandlers(){
   document.querySelectorAll('[data-action="cpo-area"]').forEach(el => {
     el.addEventListener('click', () => { drill.cpoBudget.area = el.dataset.area; render(); });
   });
+  document.querySelectorAll('[data-action="dl-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.delivery.city = el.dataset.city; render(); });
+  });
+  document.querySelectorAll('[data-action="dl-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.delivery.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-action="dl-vendor"]').forEach(el => {
+    el.addEventListener('click', () => { drill.delivery.vendorId = el.dataset.vendorId; render(); });
+  });
   document.querySelectorAll('[data-crumb]').forEach(el => {
     el.addEventListener('click', () => {
       const [module, level] = el.dataset.crumb.split('-');
@@ -1929,6 +2060,11 @@ function attachHandlers(){
       if(module === 'os'){ if(level==='city') { drill.orderShare.city=null; } }
       if(module === 'imp'){ if(level==='city') { drill.impression.city=null; drill.impression.area=null; } if(level==='area'){ drill.impression.area=null; } }
       if(module === 'cpo'){ if(level==='city') { drill.cpoBudget.city=null; drill.cpoBudget.area=null; } if(level==='area'){ drill.cpoBudget.area=null; } }
+      if(module === 'dl'){
+        if(level==='city') { drill.delivery.city=null; drill.delivery.area=null; drill.delivery.vendorId=null; }
+        if(level==='area'){ drill.delivery.area=null; drill.delivery.vendorId=null; }
+        if(level==='vendor'){ drill.delivery.vendorId=null; }
+      }
       render();
     });
   });
@@ -1946,6 +2082,8 @@ function attachHandlers(){
   if(impConvSearch) impConvSearch.addEventListener('input', () => filterTable('impConvTable', impConvSearch.value));
   const cpoVendorSearch = document.getElementById('cpoVendorSearch');
   if(cpoVendorSearch) cpoVendorSearch.addEventListener('input', () => filterTable('cpoVendorTable', cpoVendorSearch.value));
+  const deliveryVendorSearch = document.getElementById('deliveryVendorSearch');
+  if(deliveryVendorSearch) deliveryVendorSearch.addEventListener('input', () => filterTable('deliveryVendorTable', deliveryVendorSearch.value));
 
   drawCharts();
 }
@@ -2061,6 +2199,35 @@ function drawCharts(){
           type:'line',
           data:{ labels: imp.timeSlots, datasets:[{ data: block.bySlot, borderColor:'#FF5A36', backgroundColor:'rgba(255,90,54,.12)', fill:true, tension:.3, pointRadius:0 }]},
           options:{ plugins:{legend:{display:false}}, scales:{ x:{ grid:{display:false}, ticks:{ maxTicksLimit:8 } }, y:{grid:{color:gridColor}} } }
+        });
+      }
+    }
+  }
+
+  if(currentPanel === 'delivery'){
+    const dl = DATA.delivery;
+    if(dl){
+      const d = drill.delivery;
+      let series;
+      if(!d.city){
+        series = dl.overall.avgByTime;
+      } else if(d.city && !d.area){
+        const cdata = dl.byCity[d.city];
+        series = cdata ? cdata.avgByTime : [];
+      } else if(d.area && !d.vendorId){
+        const adata = dl.byCity[d.city] && dl.byCity[d.city].areas[d.area];
+        series = adata ? adata.avgByTime : [];
+      } else {
+        const adata = dl.byCity[d.city] && dl.byCity[d.city].areas[d.area];
+        const vendor = adata && adata.vendors.find(v => String(v.id) === String(d.vendorId));
+        series = vendor ? vendor.byTime : [];
+      }
+      const ctx1 = document.getElementById('deliveryTimeChart');
+      if(ctx1){
+        charts.deliveryTimeChart = new Chart(ctx1, {
+          type:'line',
+          data:{ labels: dl.timeSlots, datasets:[{ data: series, borderColor:'#4C8CFF', backgroundColor:'rgba(76,140,255,.12)', fill:true, tension:.3, pointRadius:2, spanGaps:true }]},
+          options:{ plugins:{legend:{display:false}}, scales:{ x:{ grid:{display:false} }, y:{grid:{color:gridColor}, title:{display:true,text:'km'}} } }
         });
       }
     }
