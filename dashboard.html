@@ -218,6 +218,7 @@ let currentPanel = 'overview';
 let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null} };
 let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion'
 let orderWindow = 'mtd';
+let deliveryDate = null; // set to the latest available date on first render of the Delivery tab
 let superTypeFilter = 'all'; // 'all' or a group key from SUPER_TYPE_GROUPS
 const charts = {};
 
@@ -307,6 +308,7 @@ function attemptUnlock(password, fromSession){
     })
     .catch(err => {
       btn.disabled = false;
+      btn.textContent = 'Unlock';
       if(fromSession){
         try { sessionStorage.removeItem(SESSION_KEY); } catch(e){}
         return; // silently fall back to asking for the password
@@ -319,14 +321,31 @@ function attemptUnlock(password, fromSession){
     });
 }
 
+function attemptUnlockWithFeedback(password, fromSession){
+  if(!fromSession){
+    const btn = document.getElementById('lockSubmit');
+    const errEl = document.getElementById('lockError');
+    btn.disabled = true;
+    btn.textContent = 'Unlocking…';
+    errEl.textContent = '';
+    // Let the browser paint the "Unlocking…" state before the (synchronous,
+    // can take a couple seconds on a big data file) decrypt work starts —
+    // otherwise the button change and the freeze land in the same frame
+    // and it looks like nothing happened when you click.
+    setTimeout(() => attemptUnlock(password, fromSession), 20);
+  } else {
+    attemptUnlock(password, fromSession);
+  }
+}
+
 document.getElementById('lockSubmit').addEventListener('click', () => {
   const pw = document.getElementById('lockPassword').value;
-  if(pw) attemptUnlock(pw, false);
+  if(pw) attemptUnlockWithFeedback(pw, false);
 });
 document.getElementById('lockPassword').addEventListener('keydown', (e) => {
   if(e.key === 'Enter'){
     const pw = document.getElementById('lockPassword').value;
-    if(pw) attemptUnlock(pw, false);
+    if(pw) attemptUnlockWithFeedback(pw, false);
   }
 });
 
@@ -498,16 +517,16 @@ function renderOverview(){
   }
   function ordersForCity(city){
     const cdata = osAll.byCity[city];
-    if(!cdata) return { m41Orders:0, platformOrders:0, share:0, allCitiesShare:undefined };
+    if(!cdata) return { m41Orders:0, platformOrders:0, share:0, m4oCitiesShare:undefined };
     if(!filtered){
       const w = win==='yesterday' ? cdata.yesterday : cdata.mtd;
-      return { m41Orders:w.m41Orders, platformOrders:w.platformOrders, share: w.platformOrders?w.m41Orders/w.platformOrders:0, allCitiesShare:w.allCitiesShare };
+      return { m41Orders:w.m41Orders, platformOrders:w.platformOrders, share: w.platformOrders?w.m41Orders/w.platformOrders:0, m4oCitiesShare:w.m4oCitiesShare };
     }
     const field = win === 'yesterday' ? { m41:'m41Y', plat:'platY' } : { m41:'m41Mtd', plat:'platMtd' };
     const rows = Object.values(cdata.areas).flatMap(a=>a.rows).filter(matchesSuperType);
     const m41 = rows.reduce((s,r)=>s+r[field.m41],0);
     const plat = rows.reduce((s,r)=>s+r[field.plat],0);
-    return { m41Orders:m41, platformOrders:plat, share: plat?m41/plat:0, allCitiesShare: undefined };
+    return { m41Orders:m41, platformOrders:plat, share: plat?m41/plat:0, m4oCitiesShare: undefined };
   }
 
   if(!d.city){
@@ -527,7 +546,7 @@ function renderOverview(){
     const totalM41 = rows.reduce((s,r)=>s+r.m41Orders,0);
     const totalPlat = rows.reduce((s,r)=>s+r.platformOrders,0);
     const overallShare = totalPlat ? totalM41/totalPlat : 0;
-    const overallAreaShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.allCitiesShare:osAll.overallMtd.allCitiesShare) : undefined;
+    const overallAreaShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.m4oCitiesShare:osAll.overallMtd.m4oCitiesShare) : undefined;
     const totalBudget = cpoAll ? cpoAll.overall.all.totalBudget : null;
     const overallCpo = cpoAll ? cpoAll.overall.all.cpo : null;
 
@@ -546,14 +565,14 @@ function renderOverview(){
         <div class="stat-card"><div class="label">Total Packs</div><div class="value">${fmt(totalPacks)}</div></div>
         <div class="stat-card accent"><div class="label">Avg Rate</div><div class="value">${overallRate.toFixed(2)}</div></div>
         <div class="stat-card"><div class="label">M4O Orders</div><div class="value small">${fmt(totalM41)}</div></div>
-        <div class="stat-card purple"><div class="label">M4O Share (M4O Cities)</div><div class="value small">${shareToPct(overallShare)}</div></div>
-        ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">M4O Share (All Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
+        <div class="stat-card purple"><div class="label">Vendor Engagement</div><div class="value small">${shareToPct(overallShare)}</div></div>
+        ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
         ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">Overall CPO</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>M4O Share (M4O Cities)</th><th>M4O Share (All Cities)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
           <tbody>
             ${rows.map(r => `<tr class="clickable" data-action="ov-city" data-city="${escapeAttr(r.city)}">
               <td>${escapeHtml(r.city)}</td>
@@ -562,7 +581,7 @@ function renderOverview(){
               <td style="font-family:var(--mono); color:var(--accent)">${r.avgRate.toFixed(2)}</td>
               <td style="font-family:var(--mono)">${fmt(r.m41Orders)}</td>
               <td style="font-family:var(--mono); color:var(--purple)">${r.platformOrders?shareToPct(r.share):'<span class="dim">—</span>'}</td>
-              <td style="font-family:var(--mono); color:var(--seg-b)">${r.allCitiesShare!==undefined && r.allCitiesShare!==null?shareToPct(r.allCitiesShare):'<span class="dim">—</span>'}</td>
+              <td style="font-family:var(--mono); color:var(--seg-b)">${r.m4oCitiesShare!==undefined && r.m4oCitiesShare!==null?shareToPct(r.m4oCitiesShare):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono)">${r.cpo?tomanCompact(r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono); color:var(--accent)">${r.cpo&&r.cpo.cpo!==null?tomanCompact(r.cpo.cpo):'<span class="dim">—</span>'}</td>
               <td>${overviewStatusBadge(r.status)}</td>
@@ -617,7 +636,7 @@ function renderOverview(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>M4O Share (M4O Cities)</th><th>M4O Share (Total Platform, Area)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
         <tbody>
           ${rows.map(r => `<tr>
             <td>${escapeHtml(r.area)}</td>
@@ -1362,16 +1381,17 @@ function renderOrderShare(){
         <div class="toggle-btn ${orderWindow==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
       </div>
     </div>
-    <div class="section-note">Two different denominators are used across this tab — "Order Share (M4O Cities)" is M4O orders ÷ platform orders of only the vendors that carry Meal4One packs; "Order Share (All Cities)" is M4O orders ÷ every Restaurant order on Snapp Food, across every city (from the "All Order" sheet), M4O or not.</div>
+    <div class="section-note">Three definitions, narrowest to widest denominator — "Vendor Engagement" is M4O orders ÷ platform orders of only the vendors that carry Meal4One packs; "Order Share (M4O Cities)" is M4O orders ÷ every Restaurant order in the cities M4O operates in (from "All Order"); "Order Share (All Cities)" is the same but across every city on Snapp Food, M4O or not — overall only, since dividing one city by a project-wide total wouldn't mean anything.</div>
     <div class="stat-row">
       <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(overall.m41Orders)}</div></div>
       <div class="stat-card"><div class="label">Platform Orders (M4O vendors only)</div><div class="value">${fmt(overall.platformOrders)}</div></div>
-      <div class="stat-card accent"><div class="label">Order Share (M4O Cities)</div><div class="value">${shareToPct(overall.share)}</div><div class="sub">M4O orders ÷ all orders placed with M4O vendors</div></div>
+      <div class="stat-card accent"><div class="label">Vendor Engagement</div><div class="value">${shareToPct(overall.share)}</div><div class="sub">M4O orders ÷ all orders placed with M4O vendors</div></div>
+      ${overall.m4oCitiesShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value">${overall.m4oCitiesShare!==null?shareToPct(overall.m4oCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders in M4O's own cities</div></div>` : ''}
       ${overall.allCitiesShare !== undefined ? `<div class="stat-card purple"><div class="label">Order Share (All Cities)</div><div class="value">${overall.allCitiesShare!==null?shareToPct(overall.allCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders on Snapp Food, every city</div></div>` : ''}
       <div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value">${shareToPct(tc.rate)}</div><div class="sub">${tc.numerator} / ${tc.denominator} TopCritical vendors ordered M4O</div></div>
       ${overall.ordersPerOrderedVendor !== undefined ? `<div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${overall.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(overall.orderedVendorCount)} vendors placed at least 1 order</div></div>` : ''}
     </div>
-    ${overall.allCitiesShare === undefined ? '<div class="section-note">"Order Share (All Cities)" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
+    ${overall.allCitiesShare === undefined ? '<div class="section-note">"Order Share (M4O/All Cities)" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
     ${tc.bySegment ? `<div class="section-note">Top Critical breakdown: ${fmt(tc.bySegment['Highly Engaged']||0)} Highly Engaged, ${fmt(tc.bySegment['Moderate Engaged']||0)} Moderate, ${fmt(tc.bySegment['Low Engaged']||0)} Low, ${fmt(tc.bySegment['No Order']||0)} No Order.</div>` : ''}
     <div class="section-title">Ordered vs. Unordered</div>
     <div class="stat-row">
@@ -1403,12 +1423,12 @@ function renderOrderShare(){
     </div>` : ''}
     <div class="chart-row">
       <div class="chart-box"><h3>M4O Orders by City</h3><canvas id="m41ByCityChart"></canvas></div>
-      <div class="chart-box"><h3>Order Share (M4O Cities), by City</h3><canvas id="shareByCityChart"></canvas></div>
+      <div class="chart-box"><h3>Vendor Engagement, by City</h3><canvas id="shareByCityChart"></canvas></div>
     </div>
     <div class="section-title">Cities (${orderWindow === 'yesterday' ? 'Yesterday' : 'Month to Date'})</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>City</th><th>Vendors</th><th>M4O Orders</th><th>Platform Orders (M4O vendors)</th><th>O/V</th><th>Order Share (All Cities)</th><th>Order Share (M4O Cities)</th></tr></thead>
+        <thead><tr><th>City</th><th>Vendors</th><th>M4O Orders</th><th>Platform Orders (M4O vendors)</th><th>O/V</th><th>Order Share (M4O Cities)</th><th>Vendor Engagement</th></tr></thead>
         <tbody>
           ${cities.map(([city,v,vendorCount]) => {
             const cdata = os.byCity[city];
@@ -1419,7 +1439,7 @@ function renderOrderShare(){
             <td style="font-family:var(--mono)">${fmt(v.m41Orders)}</td>
             <td style="font-family:var(--mono)">${fmt(v.platformOrders)}</td>
             <td style="font-family:var(--mono)">${win.ordersPerOrderedVendor !== undefined ? win.ordersPerOrderedVendor.toFixed(1) : '—'}</td>
-            <td style="font-family:var(--mono); color:var(--purple)">${win.allCitiesShare !== null && win.allCitiesShare !== undefined ? shareToPct(win.allCitiesShare) : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${win.m4oCitiesShare !== null && win.m4oCitiesShare !== undefined ? shareToPct(win.m4oCitiesShare) : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${v.platformOrders ? shareToPct(v.m41Orders/v.platformOrders) : '—'}</td>
           </tr>`;
           }).join('')}
@@ -1483,11 +1503,11 @@ function renderOrderShareCityDrill(city){
     <div class="stat-row">
       <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(cityWin.m41Orders)}</div></div>
       <div class="stat-card"><div class="label">Platform Orders (M4O vendors)</div><div class="value">${fmt(cityWin.platformOrders)}</div></div>
-      <div class="stat-card accent"><div class="label">Order Share (M4O Cities)</div><div class="value">${cityWin.platformOrders ? shareToPct(cityWin.m41Orders/cityWin.platformOrders) : '—'}</div></div>
-      ${cityWin.allCitiesShare !== undefined ? `<div class="stat-card purple"><div class="label">Order Share (All Cities)</div><div class="value">${cityWin.allCitiesShare!==null?shareToPct(cityWin.allCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
+      <div class="stat-card accent"><div class="label">Vendor Engagement</div><div class="value">${cityWin.platformOrders ? shareToPct(cityWin.m41Orders/cityWin.platformOrders) : '—'}</div></div>
+      ${cityWin.m4oCitiesShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value">${cityWin.m4oCitiesShare!==null?shareToPct(cityWin.m4oCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
       ${cityWin.ordersPerOrderedVendor !== undefined ? `<div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${cityWin.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(cityWin.orderedVendorCount)} vendors ordered</div></div>` : ''}
     </div>
-    ${cityWin.allCitiesShare === undefined ? '<div class="section-note">"Order Share (All Cities)" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
+    ${cityWin.m4oCitiesShare === undefined ? '<div class="section-note">"Order Share (M4O Cities)" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
     <div class="section-title">Marketing Areas (${areas.length})</div>
     <div class="table-wrap">
       <table>
@@ -1553,7 +1573,7 @@ function renderKitchen(){
             <tr><td>Avg Snapp Discount</td><td>${o.avgSnappDiscountToman !== null ? toman(o.avgSnappDiscountToman) : '<span class="dim">N/A — see note below</span>'}</td><td style="font-family:var(--mono); color:var(--accent)">${toman(nk.avgSnappDiscountToman)}</td></tr>
             <tr><td>M4O Orders (${win==='yesterday'?'Yesterday':'MTD'})</td><td style="font-family:var(--mono)">${fmt(o[orders])}</td><td style="font-family:var(--mono)">${fmt(nk[orders])}</td></tr>
             <tr><td>Platform Orders (${win==='yesterday'?'Yesterday':'MTD'})</td><td style="font-family:var(--mono)">${fmt(o[platform])}</td><td style="font-family:var(--mono)">${fmt(nk[platform])}</td></tr>
-            <tr><td>M4O Share (M4O Cities)</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(o[m4oShare])}</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(nk[m4oShare])}</td></tr>
+            <tr><td>Vendor Engagement</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(o[m4oShare])}</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(nk[m4oShare])}</td></tr>
             <tr><td>Share of ALL M4O Orders (project-wide)</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(o[shareOfAll])}</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(nk[shareOfAll])}</td></tr>
             ${DATA.impression ? `<tr><td>Share of Total Impressions (yesterday)</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.kitchenTotal_pct)}</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.nonKitchenTotal_pct)}</td></tr>` : ''}
             ${DATA.cpoBudget ? `<tr><td>Total Budget (MTD)</td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.kitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.kitchen.total.totalBudget_pct)})</span></td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.nonKitchen.total.totalBudget_pct)})</span></td></tr>
@@ -1853,100 +1873,82 @@ function progressRow(label, value, color){
 }
 
 /* ============================================================
-   MODULE: DELIVERY (avg. M4O visibility radius by hour, latest day)
+   MODULE: DELIVERY (avg. M4O visibility radius by hour, per day)
    ============================================================ */
+function deliveryDateSelector(dlAll){
+  return `<select id="deliveryDateSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:var(--mono)">
+    ${[...dlAll.dates].reverse().map(dt => `<option value="${escapeAttr(dt)}" ${dt===deliveryDate?'selected':''}>${escapeHtml(dt)}</option>`).join('')}
+  </select>`;
+}
+
 function renderDelivery(){
-  const dl = DATA.delivery;
-  if(!dl){
+  const dlAll = DATA.delivery;
+  if(!dlAll || !dlAll.dates || !dlAll.dates.length){
     return `<div class="empty-state">No Delivery data available. Set DELIVERY_SPREADSHEET_ID in config.local.js, share the sheet with the service account, then re-run <code>node update_dashboard.js</code>.</div>`;
   }
+  if(!deliveryDate || !dlAll.byDate[deliveryDate]) deliveryDate = dlAll.dates[dlAll.dates.length - 1];
+  const dl = dlAll.byDate[deliveryDate];
   const d = drill.delivery;
+
+  const dateBar = `<div class="flex-between">
+    <div class="section-note" style="margin:0">Maximum radius (km) M4O vendors were shown at, snapshotted through the day. Hover the chart for the value at each time. Pick a day:</div>
+    ${deliveryDateSelector(dlAll)}
+  </div>`;
 
   if(!d.city){
     const cities = Object.entries(dl.byCity).sort((a,b)=> b[1].vendorCount - a[1].vendorCount);
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">Maximum radius (km) at which Meal4One vendors were shown to users, snapshotted through the day on ${escapeHtml(dl.date)} — the most recent day available. Averaged across vendors at each snapshot time.</div>
-      <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(dl.overall.vendorCount)}</div></div>
-        <div class="stat-card"><div class="label">Snapshot Times</div><div class="value small">${dl.timeSlots.length}</div></div>
-        <div class="stat-card"><div class="label">Date</div><div class="value small">${escapeHtml(dl.date)}</div></div>
-      </div>
-      <div class="chart-box"><h3>Average Radius by Hour — All Cities</h3><canvas id="deliveryTimeChart"></canvas></div>
+      ${dateBar}
+      <div class="chart-box"><h3>Average Radius by Hour — All Cities (${escapeHtml(deliveryDate)})</h3><canvas id="deliveryTimeChart"></canvas></div>
       <div class="section-title">Cities (${cities.length})</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>City</th><th>Vendors</th><th>Avg Radius (last snapshot)</th></tr></thead>
-          <tbody>
-            ${cities.map(([city,v]) => {
-              const last = [...v.avgByTime].reverse().find(x => x !== null);
-              return `<tr class="clickable" data-action="dl-city" data-city="${escapeAttr(city)}">
-              <td>${escapeHtml(city)}</td>
-              <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
-              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
-            </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
+      <div class="card-grid">
+        ${cities.map(([city,v]) => `<div class="list-card" data-action="dl-city" data-city="${escapeAttr(city)}">
+          <div class="name">${escapeHtml(city)}</div>
+          <div class="row"><span>Vendors tracked</span><b>${fmt(v.vendorCount)}</b></div>
+        </div>`).join('')}
       </div>`;
   }
 
   const cdata = dl.byCity[d.city];
   if(!cdata){
-    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.city)}.</div>`;
+    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.city)} on ${escapeHtml(deliveryDate)}.</div>`;
   }
 
   if(!d.area){
     const areas = Object.entries(cdata.areas).sort((a,b)=> b[1].vendorCount - a[1].vendorCount);
     return `
       ${breadcrumb(['All Cities', d.city], ['dl-city-null'])}
-      <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(cdata.vendorCount)}</div></div>
-      </div>
-      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.city)}</h3><canvas id="deliveryTimeChart"></canvas></div>
+      ${dateBar}
+      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.city)} (${escapeHtml(deliveryDate)})</h3><canvas id="deliveryTimeChart"></canvas></div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Area</th><th>Vendors</th><th>Avg Radius (last snapshot)</th></tr></thead>
-          <tbody>
-            ${areas.map(([area,v]) => {
-              const last = [...v.avgByTime].reverse().find(x => x !== null);
-              return `<tr class="clickable" data-action="dl-area" data-area="${escapeAttr(area)}">
-              <td>${escapeHtml(area)}</td>
-              <td style="font-family:var(--mono)">${fmt(v.vendorCount)}</td>
-              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
-            </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
+      <div class="card-grid">
+        ${areas.map(([area,v]) => `<div class="list-card" data-action="dl-area" data-area="${escapeAttr(area)}">
+          <div class="name">${escapeHtml(area)}</div>
+          <div class="row"><span>Vendors tracked</span><b>${fmt(v.vendorCount)}</b></div>
+        </div>`).join('')}
       </div>`;
   }
 
   const adata = cdata.areas[d.area];
   if(!adata){
-    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.area)}.</div>`;
+    return `<div class="empty-state">No Delivery data for ${escapeHtml(d.area)} on ${escapeHtml(deliveryDate)}.</div>`;
   }
 
   if(!d.vendorId){
     const vendors = [...adata.vendors].sort((a,b)=> (a.name||'').localeCompare(b.name||''));
     return `
       ${breadcrumb(['All Cities', d.city, d.area], ['dl-city-null', 'dl-area-null'])}
-      <div class="stat-row">
-        <div class="stat-card accent"><div class="label">Vendors Tracked</div><div class="value">${fmt(adata.vendorCount)}</div></div>
-      </div>
-      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.area)}</h3><canvas id="deliveryTimeChart"></canvas></div>
+      ${dateBar}
+      <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(d.area)} (${escapeHtml(deliveryDate)})</h3><canvas id="deliveryTimeChart"></canvas></div>
       <input class="search-box" id="deliveryVendorSearch" placeholder="Filter vendors by name…">
       <div class="table-wrap">
         <table id="deliveryVendorTable">
-          <thead><tr><th>Vendor</th><th>Avg Radius (last snapshot)</th></tr></thead>
+          <thead><tr><th>Vendor</th></tr></thead>
           <tbody>
-            ${vendors.map(v => {
-              const last = [...v.byTime].reverse().find(x => x !== null);
-              return `<tr class="clickable" data-name="${escapeHtml((v.name||'').toLowerCase())}" data-action="dl-vendor" data-vendor-id="${escapeAttr(v.id)}">
+            ${vendors.map(v => `<tr class="clickable" data-name="${escapeHtml((v.name||'').toLowerCase())}" data-action="dl-vendor" data-vendor-id="${escapeAttr(v.id)}">
               <td>${escapeHtml(v.name || 'Unknown')}</td>
-              <td style="font-family:var(--mono); font-weight:600">${last!==undefined?last.toFixed(2)+' km':'<span class="dim">—</span>'}</td>
-            </tr>`;
-            }).join('')}
+            </tr>`).join('')}
           </tbody>
         </table>
       </div>`;
@@ -1958,18 +1960,8 @@ function renderDelivery(){
   }
   return `
     ${breadcrumb(['All Cities', d.city, d.area, vendor.name || 'Vendor'], ['dl-city-null', 'dl-area-null', 'dl-vendor-null'])}
-    <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(vendor.name || 'Vendor')}</h3><canvas id="deliveryTimeChart"></canvas></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Time</th><th>Radius</th></tr></thead>
-        <tbody>
-          ${dl.timeSlots.map((t,i) => `<tr>
-            <td>${escapeHtml(t)}</td>
-            <td style="font-family:var(--mono)">${vendor.byTime[i]!==null?vendor.byTime[i].toFixed(2)+' km':'<span class="dim">—</span>'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
+    ${dateBar}
+    <div class="chart-box"><h3>Average Radius by Hour — ${escapeHtml(vendor.name || 'Vendor')} (${escapeHtml(deliveryDate)})</h3><canvas id="deliveryTimeChart"></canvas></div>`;
 }
 
 /* ============================================================
@@ -2044,6 +2036,8 @@ function attachHandlers(){
   document.querySelectorAll('[data-action="dl-vendor"]').forEach(el => {
     el.addEventListener('click', () => { drill.delivery.vendorId = el.dataset.vendorId; render(); });
   });
+  const deliveryDateSelect = document.getElementById('deliveryDateSelect');
+  if(deliveryDateSelect) deliveryDateSelect.addEventListener('change', () => { deliveryDate = deliveryDateSelect.value; render(); });
   document.querySelectorAll('[data-crumb]').forEach(el => {
     el.addEventListener('click', () => {
       const [module, level] = el.dataset.crumb.split('-');
@@ -2205,7 +2199,8 @@ function drawCharts(){
   }
 
   if(currentPanel === 'delivery'){
-    const dl = DATA.delivery;
+    const dlAll = DATA.delivery;
+    const dl = dlAll && dlAll.byDate ? dlAll.byDate[deliveryDate] : null;
     if(dl){
       const d = drill.delivery;
       let series;

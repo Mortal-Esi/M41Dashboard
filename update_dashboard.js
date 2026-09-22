@@ -365,7 +365,12 @@ async function main() {
   console.log(`  CoverageResult: ${coverageResultRaw.length} rows`);
 
   console.log('Fetching Delivery radius snapshots…');
-  let deliveryModule = null;
+  // Keep a rolling window of days rather than the whole sheet's history —
+  // it grows by one tab every day forever, and each day adds a full
+  // per-vendor breakdown, so pulling all of it would keep bloating
+  // dashboard_data.enc (and how long it takes to decrypt) indefinitely.
+  const DELIVERY_DAYS_KEPT = 14;
+  let deliveryOutput = null;
   try {
     if (DELIVERY_SPREADSHEET_ID === 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE') {
       console.log('  Skipped — DELIVERY_SPREADSHEET_ID not configured yet (see config.local.js.example).');
@@ -375,10 +380,17 @@ async function main() {
       if (deliveryDateTabs.length === 0) {
         console.log('  Skipped — no date-named tabs (YYYY-MM-DD) found in the Delivery sheet.');
       } else {
-        const latestDeliveryDate = deliveryDateTabs[deliveryDateTabs.length - 1];
-        const deliveryRaw = await fetchSheetAsObjects(sheets, DELIVERY_SPREADSHEET_ID, latestDeliveryDate);
-        console.log(`  Delivery (${latestDeliveryDate}): ${deliveryRaw.length} rows`);
-        deliveryModule = buildDeliveryModule(deliveryRaw, latestDeliveryDate);
+        const keptDates = deliveryDateTabs.slice(-DELIVERY_DAYS_KEPT);
+        const deliveryRawByDate = await Promise.all(
+          keptDates.map((date) => fetchSheetAsObjects(sheets, DELIVERY_SPREADSHEET_ID, date))
+        );
+        const byDate = {};
+        keptDates.forEach((date, i) => {
+          console.log(`  Delivery (${date}): ${deliveryRawByDate[i].length} rows`);
+          const mod = buildDeliveryModule(deliveryRawByDate[i], date);
+          if (mod) byDate[date] = mod;
+        });
+        deliveryOutput = { dates: Object.keys(byDate).sort(), byDate };
       }
     }
   } catch (err) {
@@ -666,9 +678,9 @@ async function main() {
     orderShareByCity[city] = {
       vendorCount: new Set(cRows.map((r) => r.VendorID)).size,
       yesterday: { ...wsYCity, areaPlatformOrders: areaPlatformYCity, areaM4OShare: areaPlatformYCity ? wsYCity.m41Orders / areaPlatformYCity : 0,
-        allOrders: allOrderCity ? allOrderCity.yesterday : null, allCitiesShare: allOrderCity && allOrderCity.yesterday ? wsYCity.m41Orders / allOrderCity.yesterday : null },
+        cityAllOrders: allOrderCity ? allOrderCity.yesterday : null, m4oCitiesShare: allOrderCity && allOrderCity.yesterday ? wsYCity.m41Orders / allOrderCity.yesterday : null },
       mtd: { ...wsMtdCity, areaPlatformOrders: areaPlatformMtdCity, areaM4OShare: areaPlatformMtdCity ? wsMtdCity.m41Orders / areaPlatformMtdCity : 0,
-        allOrders: allOrderCity ? allOrderCity.mtd : null, allCitiesShare: allOrderCity && allOrderCity.mtd ? wsMtdCity.m41Orders / allOrderCity.mtd : null },
+        cityAllOrders: allOrderCity ? allOrderCity.mtd : null, m4oCitiesShare: allOrderCity && allOrderCity.mtd ? wsMtdCity.m41Orders / allOrderCity.mtd : null },
       areas,
     };
   }
@@ -697,13 +709,31 @@ async function main() {
 
   // ---- Project-wide "Order Share (All Cities)" — M4O orders ÷ the All Order
   // sheet's total Restaurant orders, summed over every city it lists (M4O's
-  // ~19 cities plus every city M4O doesn't operate in yet). ----
+  // ~19 cities plus every city M4O doesn't operate in yet). Overall only —
+  // dividing one city's M4O orders by this project-wide total wouldn't mean
+  // anything, so this is never computed per city. ----
   let allOrderTotalY = 0, allOrderTotalMtd = 0;
   for (const v of allOrderByCity.values()) { allOrderTotalY += v.yesterday; allOrderTotalMtd += v.mtd; }
   overallYesterday.allOrders = allOrderTotalY;
   overallYesterday.allCitiesShare = allOrderTotalY ? overallYesterday.m41Orders / allOrderTotalY : null;
   overallMtd.allOrders = allOrderTotalMtd;
   overallMtd.allCitiesShare = allOrderTotalMtd ? overallMtd.m41Orders / allOrderTotalMtd : null;
+
+  // ---- Project-wide "Order Share (M4O Cities)" — M4O orders ÷ the All Order
+  // sheet's totals, summed over ONLY the cities M4O actually operates in
+  // (the same city set as orderShareByCity/byCityOrder above). This is the
+  // per-city m4oCitiesShare above, rolled up — NOT the same as
+  // allCitiesShare, whose denominator includes every city on the platform. ----
+  const m4oCityNames = new Set(byCityOrder.keys());
+  let m4oCitiesAllOrderY = 0, m4oCitiesAllOrderMtd = 0;
+  for (const city of m4oCityNames) {
+    const ao = allOrderByCity.get(city);
+    if (ao) { m4oCitiesAllOrderY += ao.yesterday; m4oCitiesAllOrderMtd += ao.mtd; }
+  }
+  overallYesterday.m4oCitiesAllOrders = m4oCitiesAllOrderY;
+  overallYesterday.m4oCitiesShare = m4oCitiesAllOrderY ? overallYesterday.m41Orders / m4oCitiesAllOrderY : null;
+  overallMtd.m4oCitiesAllOrders = m4oCitiesAllOrderMtd;
+  overallMtd.m4oCitiesShare = m4oCitiesAllOrderMtd ? overallMtd.m41Orders / m4oCitiesAllOrderMtd : null;
 
   // ---- Ordered / unordered vendor % (both windows) ----
   const totalVendorsInOrder = new Set(orderRaw.map((r) => r.VendorID)).size;
@@ -1231,7 +1261,7 @@ async function main() {
     coverageModel,
     impression: impressionModule,
     cpoBudget: cpoBudgetModule,
-    delivery: deliveryModule,
+    delivery: deliveryOutput,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');
