@@ -2,7 +2,7 @@
  * Meal4One Dashboard — Sync Script
  * ---------------------------------
  * Reads two Google Sheets using a service account:
- *   1. The main data sheet — MainData, Order, TopCritical, BI, Impression tabs
+ *   1. The main data sheet — MainData, MotherVendors, TC Eng, TC Eng Per City, All Order, BI, Impression tabs
  *   2. The Coverage Model sheet — CityCoverage, CoverageResult tabs
  * Applies the processing rules described in README.md, and writes
  * dashboard_data.json next to this file.
@@ -33,13 +33,16 @@ const SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'service-account.json');
 // would conflict with git. Env vars, if set, take priority over that.
 let LOCAL_CONFIG = {};
 try { LOCAL_CONFIG = require('./config.local.js'); } catch (e) { /* no config.local.js yet — fine, falls through below */ }
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/Order/TopCritical/BI)
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/MotherVendors/TC Eng/BI)
 const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
+const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
 
 const SHEET_NAMES = {
   mainData: 'MainData',
-  order: 'Order',
-  topCritical: 'TopCritical',
+  order: 'MotherVendors', // renamed from 'Order' — same schema, just a new tab name
+  topCritical: 'TC Eng', // renamed from 'TopCritical' — richer per-vendor engagement schema
+  topCriticalPerCity: 'TC Eng Per City',
+  allOrder: 'All Order', // total Restaurant orders per city, ALL of Snapp Food (not just M4O vendors)
   bi: 'BI',
   impression: 'Impression',
   cpoBudget: 'CPO_Budget_MTD',
@@ -78,6 +81,11 @@ async function fetchSheetAsObjects(sheets, spreadsheetId, sheetName) {
     headers.forEach((h, i) => { obj[h] = row[i] === undefined ? null : row[i]; });
     return obj;
   });
+}
+
+async function listSheetTitles(sheets, spreadsheetId) {
+  const res = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
+  return (res.data.sheets || []).map((s) => s.properties.title);
 }
 
 // ============================================================
@@ -230,22 +238,94 @@ function packStatsBlock(rows) {
 }
 
 // ============================================================
+// DELIVERY RADIUS (separate Google Sheet, one tab per day named
+// YYYY-MM-DD, each with its own set of Distance_HHMM snapshot columns —
+// the snapshot times aren't on a fixed schedule, so the time axis is
+// read from whichever columns that day's tab actually has). Only the
+// most recent date tab is used, matching the "yesterday" convention the
+// rest of the dashboard uses for daily figures.
+// ============================================================
+function buildDeliveryModule(rows, date) {
+  if (rows.length === 0) return null;
+  const distanceCols = Object.keys(rows[0])
+    .filter((h) => /^Distance_\d{3,4}$/.test(h))
+    .map((h) => {
+      const digits = h.slice('Distance_'.length).padStart(4, '0');
+      return { col: h, time: `${digits.slice(0, 2)}:${digits.slice(2, 4)}`, sortKey: Number(digits) };
+    })
+    .sort((a, b) => a.sortKey - b.sortKey);
+  if (distanceCols.length === 0) return null;
+
+  // "Maximum radius that shows M4O vendors" — per vendor per timestamp, take
+  // the max across that vendor's pack rows. The same value repeats across a
+  // vendor's packs almost always; a blank just means that pack wasn't live
+  // at that snapshot (excluded, not treated as 0), and the rare genuine
+  // pack-level difference is resolved by taking the max, per the metric's
+  // own name.
+  const vendorMap = new Map();
+  for (const r of rows) {
+    const vid = String(r.VendorID);
+    if (!vendorMap.has(vid)) {
+      vendorMap.set(vid, { id: r.VendorID, name: r.VendorTitle, city: r.City, area: r.MarketingAreaName, byTime: new Map() });
+    }
+    const entry = vendorMap.get(vid);
+    for (const { col, time } of distanceCols) {
+      const n = toNum(r[col], null);
+      if (n === null) continue;
+      const existing = entry.byTime.get(time);
+      if (existing === undefined || n > existing) entry.byTime.set(time, n);
+    }
+  }
+  const vendors = [...vendorMap.values()].map((v) => ({
+    id: v.id, name: v.name, city: v.city, area: v.area,
+    byTime: distanceCols.map(({ time }) => (v.byTime.has(time) ? Math.round(v.byTime.get(time) * 1000) / 1000 : null)),
+  }));
+
+  function avgByTimeAgg(vendorList) {
+    return distanceCols.map((_, i) => {
+      const vals = vendorList.map((v) => v.byTime[i]).filter((x) => x !== null);
+      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 1000) / 1000 : null;
+    });
+  }
+
+  const byCity = {};
+  for (const [city, cVendors] of groupBy(vendors, (v) => v.city)) {
+    const areas = {};
+    for (const [area, aVendors] of groupBy(cVendors, (v) => v.area)) {
+      areas[area] = { vendorCount: aVendors.length, avgByTime: avgByTimeAgg(aVendors), vendors: aVendors };
+    }
+    byCity[city] = { vendorCount: cVendors.length, avgByTime: avgByTimeAgg(cVendors), areas };
+  }
+
+  return {
+    date,
+    timeSlots: distanceCols.map((c) => c.time),
+    overall: { vendorCount: vendors.length, avgByTime: avgByTimeAgg(vendors) },
+    byCity,
+  };
+}
+
+// ============================================================
 // MAIN PIPELINE
 // ============================================================
 async function main() {
   console.log('Connecting to Google Sheets…');
   const sheets = await getSheetsClient();
 
-  console.log('Fetching MainData, Order, TopCritical, BI…');
-  const [mainRaw, orderRaw, topcRaw, biRaw] = await Promise.all([
+  console.log('Fetching MainData, MotherVendors, TC Eng, TC Eng Per City, All Order, BI…');
+  const [mainRaw, orderRaw, topcRaw, topcPerCityRaw, allOrderRaw, biRaw] = await Promise.all([
     fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.mainData),
     fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.order),
     fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.topCritical),
+    fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.topCriticalPerCity),
+    fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.allOrder),
     fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.bi),
   ]);
   console.log(`  MainData: ${mainRaw.length} rows`);
-  console.log(`  Order: ${orderRaw.length} rows`);
-  console.log(`  TopCritical: ${topcRaw.length} rows`);
+  console.log(`  MotherVendors: ${orderRaw.length} rows`);
+  console.log(`  TC Eng: ${topcRaw.length} rows`);
+  console.log(`  TC Eng Per City: ${topcPerCityRaw.length} rows`);
+  console.log(`  All Order: ${allOrderRaw.length} rows`);
   console.log(`  BI: ${biRaw.length} rows`);
 
   console.log('Fetching Impression…');
@@ -283,6 +363,27 @@ async function main() {
   ]);
   console.log(`  CityCoverage: ${cityCoverageRaw.length} rows`);
   console.log(`  CoverageResult: ${coverageResultRaw.length} rows`);
+
+  console.log('Fetching Delivery radius snapshots…');
+  let deliveryModule = null;
+  try {
+    if (DELIVERY_SPREADSHEET_ID === 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE') {
+      console.log('  Skipped — DELIVERY_SPREADSHEET_ID not configured yet (see config.local.js.example).');
+    } else {
+      const deliveryTitles = await listSheetTitles(sheets, DELIVERY_SPREADSHEET_ID);
+      const deliveryDateTabs = deliveryTitles.filter((t) => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort();
+      if (deliveryDateTabs.length === 0) {
+        console.log('  Skipped — no date-named tabs (YYYY-MM-DD) found in the Delivery sheet.');
+      } else {
+        const latestDeliveryDate = deliveryDateTabs[deliveryDateTabs.length - 1];
+        const deliveryRaw = await fetchSheetAsObjects(sheets, DELIVERY_SPREADSHEET_ID, latestDeliveryDate);
+        console.log(`  Delivery (${latestDeliveryDate}): ${deliveryRaw.length} rows`);
+        deliveryModule = buildDeliveryModule(deliveryRaw, latestDeliveryDate);
+      }
+    }
+  } catch (err) {
+    console.log(`  Skipped — could not read the Delivery sheet (${err.message}). Share it with the service account as Viewer and set DELIVERY_SPREADSHEET_ID in config.local.js.`);
+  }
 
   // ---- FILTER RULE: Activity==1, OR PO>0, OR the pack has impressions ----
   // (Activity==0/PO==0 packs that still got impressions were seen by users —
@@ -483,8 +584,22 @@ async function main() {
   const overallRatingBlock = ratingBlock(df);
 
   // ============================================================
-  // MODULE 4: ORDER SHARE & ENGAGEMENT (from Order sheet)
+  // MODULE 4: ORDER SHARE & ENGAGEMENT (from MotherVendors sheet)
   // ============================================================
+  // "All Order" = total Restaurant orders per city across the WHOLE Snapp
+  // Food platform (hundreds of cities, not just the ~19 M4O operates in) —
+  // the authoritative denominator for "Order Share (All Cities)". A couple
+  // of city names repeat as separate rows in the source sheet, so sum them.
+  const allOrderByCity = new Map();
+  for (const r of allOrderRaw) {
+    const city = r.City;
+    if (!city) continue;
+    const existing = allOrderByCity.get(city) || { yesterday: 0, mtd: 0 };
+    existing.yesterday += toNum(r.YesterdayOrders, 0);
+    existing.mtd += toNum(r.MTDOrders, 0);
+    allOrderByCity.set(city, existing);
+  }
+
   const orderShareByCity = {};
   const byCityOrder = groupBy(orderRaw, (r) => r.City);
 
@@ -547,10 +662,13 @@ async function main() {
     const areaPlatformMtdCity = areaPlatformTotal(cRows, 'NewMonthAreaPlatformOrders');
     const wsYCity = windowStats(cRows);
     const wsMtdCity = windowStatsMtd(cRows);
+    const allOrderCity = allOrderByCity.get(city);
     orderShareByCity[city] = {
       vendorCount: new Set(cRows.map((r) => r.VendorID)).size,
-      yesterday: { ...wsYCity, areaPlatformOrders: areaPlatformYCity, areaM4OShare: areaPlatformYCity ? wsYCity.m41Orders / areaPlatformYCity : 0 },
-      mtd: { ...wsMtdCity, areaPlatformOrders: areaPlatformMtdCity, areaM4OShare: areaPlatformMtdCity ? wsMtdCity.m41Orders / areaPlatformMtdCity : 0 },
+      yesterday: { ...wsYCity, areaPlatformOrders: areaPlatformYCity, areaM4OShare: areaPlatformYCity ? wsYCity.m41Orders / areaPlatformYCity : 0,
+        allOrders: allOrderCity ? allOrderCity.yesterday : null, allCitiesShare: allOrderCity && allOrderCity.yesterday ? wsYCity.m41Orders / allOrderCity.yesterday : null },
+      mtd: { ...wsMtdCity, areaPlatformOrders: areaPlatformMtdCity, areaM4OShare: areaPlatformMtdCity ? wsMtdCity.m41Orders / areaPlatformMtdCity : 0,
+        allOrders: allOrderCity ? allOrderCity.mtd : null, allCitiesShare: allOrderCity && allOrderCity.mtd ? wsMtdCity.m41Orders / allOrderCity.mtd : null },
       areas,
     };
   }
@@ -576,6 +694,16 @@ async function main() {
   overallYesterday.areaM4OShare = projectAreaPlatformY ? overallYesterday.m41Orders / projectAreaPlatformY : 0;
   overallMtd.areaPlatformOrders = projectAreaPlatformMtd;
   overallMtd.areaM4OShare = projectAreaPlatformMtd ? overallMtd.m41Orders / projectAreaPlatformMtd : 0;
+
+  // ---- Project-wide "Order Share (All Cities)" — M4O orders ÷ the All Order
+  // sheet's total Restaurant orders, summed over every city it lists (M4O's
+  // ~19 cities plus every city M4O doesn't operate in yet). ----
+  let allOrderTotalY = 0, allOrderTotalMtd = 0;
+  for (const v of allOrderByCity.values()) { allOrderTotalY += v.yesterday; allOrderTotalMtd += v.mtd; }
+  overallYesterday.allOrders = allOrderTotalY;
+  overallYesterday.allCitiesShare = allOrderTotalY ? overallYesterday.m41Orders / allOrderTotalY : null;
+  overallMtd.allOrders = allOrderTotalMtd;
+  overallMtd.allCitiesShare = allOrderTotalMtd ? overallMtd.m41Orders / allOrderTotalMtd : null;
 
   // ---- Ordered / unordered vendor % (both windows) ----
   const totalVendorsInOrder = new Set(orderRaw.map((r) => r.VendorID)).size;
@@ -646,14 +774,36 @@ async function main() {
     bucket.byCity[v.city].ordersMtd += v.ordersMtd;
   }
 
-  // ---- TopCritical engagement: numerator = TopCritical vendors with NewMonthM41VO>0 (MTD) ----
-  const topcMatched = orderRaw.filter((r) => topcIds.has(String(r.VendorID)));
-  const engagedIds = new Set(topcMatched.filter((r) => toNum(r.NewMonthM41VO, 0) > 0).map((r) => String(r.VendorID)));
+  // ---- TopCritical engagement, straight from the TC Eng sheet's own
+  // Segment field (Highly/Moderate/Low Engaged vs. No Order) — this is the
+  // sheet's own classification, so it's used as-is rather than re-derived
+  // by joining against MotherVendors. ----
+  const engagedTc = topcRaw.filter((r) => r.Segment && r.Segment !== 'No Order');
   const topCriticalEngagement = {
-    denominator: topcIds.size,
-    numerator: engagedIds.size,
-    rate: topcIds.size ? engagedIds.size / topcIds.size : 0,
+    denominator: topcRaw.length,
+    numerator: engagedTc.length,
+    rate: topcRaw.length ? engagedTc.length / topcRaw.length : 0,
+    bySegment: {
+      'Highly Engaged': topcRaw.filter((r) => r.Segment === 'Highly Engaged').length,
+      'Moderate Engaged': topcRaw.filter((r) => r.Segment === 'Moderate Engaged').length,
+      'Low Engaged': topcRaw.filter((r) => r.Segment === 'Low Engaged').length,
+      'No Order': topcRaw.filter((r) => r.Segment === 'No Order').length,
+    },
   };
+  // Ready-made per-city breakdown from the TC Eng Per City sheet.
+  const topCriticalEngagementByCity = {};
+  for (const r of topcPerCityRaw) {
+    if (!r.City) continue;
+    topCriticalEngagementByCity[r.City] = {
+      total: toNum(r.Total_TC, 0),
+      highlyEngaged: toNum(r.Highly, 0),
+      moderateEngaged: toNum(r.Moderate, 0),
+      lowEngaged: toNum(r.Low, 0),
+      noOrder: toNum(r.No_Order, 0),
+      active: toNum(r.Active_TC, 0),
+      highlyEngaged_pct: toNum(r.highly_Share, 0),
+    };
+  }
 
   // ============================================================
   // MODULE 5: KITCHEN (dedicated view of Kitchen==1 vendors/packs)
@@ -1076,10 +1226,12 @@ async function main() {
       byVendorType: orderShareByVendorType,
     },
     topCriticalEngagement,
+    topCriticalEngagementByCity,
     kitchen: kitchenModule,
     coverageModel,
     impression: impressionModule,
     cpoBudget: cpoBudgetModule,
+    delivery: deliveryModule,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');
