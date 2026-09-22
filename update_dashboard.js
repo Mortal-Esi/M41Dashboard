@@ -1264,7 +1264,10 @@ async function main() {
     delivery: deliveryOutput,
   };
 
-  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');
+  // Compact (no pretty-print indentation) — this file gets encrypted as-is
+  // and shipped to the browser, so the 2-space indentation on every nested
+  // line was pure dead weight (roughly half the file, by measurement).
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output), 'utf-8');
   console.log(`\nWrote ${OUTPUT_PATH}`);
   console.log(`  Vendors: ${output.meta.totalVendorsFiltered}, Packs: ${output.meta.totalPacksFiltered}, Cities: ${output.meta.cities.length}`);
   console.log(`  SuperTypeIDs: ${superTypeIds.join(', ')}`);
