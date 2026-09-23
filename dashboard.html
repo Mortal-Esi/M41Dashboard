@@ -547,6 +547,7 @@ function renderOverview(){
     const totalPlat = rows.reduce((s,r)=>s+r.platformOrders,0);
     const overallShare = totalPlat ? totalM41/totalPlat : 0;
     const overallAreaShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.m4oCitiesShare:osAll.overallMtd.m4oCitiesShare) : undefined;
+    const overallAllCitiesShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.allCitiesShare:osAll.overallMtd.allCitiesShare) : undefined;
     const totalBudget = cpoAll ? cpoAll.overall.all.totalBudget : null;
     const overallCpo = cpoAll ? cpoAll.overall.all.cpo : null;
 
@@ -567,6 +568,7 @@ function renderOverview(){
         <div class="stat-card"><div class="label">M4O Orders</div><div class="value small">${fmt(totalM41)}</div></div>
         <div class="stat-card purple"><div class="label">Vendor Engagement</div><div class="value small">${shareToPct(overallShare)}</div></div>
         ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
+        ${overallAllCitiesShare !== undefined ? `<div class="stat-card"><div class="label">Order Share (All Cities)</div><div class="value small">${overallAllCitiesShare!==null?shareToPct(overallAllCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
         ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">Overall CPO</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
       </div>
