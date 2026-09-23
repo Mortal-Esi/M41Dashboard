@@ -49,8 +49,12 @@ password:
 - `dashboard_data.json` (the plaintext data) is **never** committed to
   git — it's listed in `.gitignore` and stays only on your computer.
 - Every time `update_dashboard.js` runs, it also encrypts that JSON
-  (AES, via `encrypt.js`) into `dashboard_data.enc`. **Only this
-  encrypted file is committed and published.**
+  (via `encrypt.js`) into `dashboard_data.enc`. **Only this
+  encrypted file is committed and published.** The data is gzipped,
+  encrypted with a random key (AES-256-GCM), and that key is locked
+  under each password with PBKDF2-SHA256 at 600,000 iterations — the
+  file is public, so the slow key derivation is what makes offline
+  password guessing expensive.
 - `dashboard.html` fetches `dashboard_data.enc` and shows a password
   screen. It decrypts the data in-browser only after the correct
   password is entered — nobody can read the data via "View Source" or
@@ -75,18 +79,30 @@ password:
   dashboard after you republish. Share the new password with people
   who need it the same way you shared the old one — never by
   committing it anywhere.
-- Once someone enters the correct password, their browser remembers it
-  for that browsing session (`sessionStorage`), so they won't be asked
-  again until they close the tab/browser.
+- Per-person passwords: `password.local.js` can instead export an
+  object, one entry per person (see `password.local.js.example`). To
+  revoke one person, delete their entry and republish — everyone else
+  keeps their password.
+- Once someone unlocks, their browser keeps that file's decryption key
+  (never the password) in `sessionStorage` for the tab, so they aren't
+  asked again until they close it or the data is refreshed.
+- `dashboard.html` loads nothing from third-party servers (Chart.js is
+  bundled as `chart.umd.js`) and sets a Content-Security-Policy that
+  only allows scripts and network requests to this site, plus
+  `noindex` so search engines skip it.
+- Old `dashboard_data.enc` versions stay in the public git history, each
+  under whichever password was current then — changing the password
+  doesn't retroactively protect them.
 
 **Honest caveat:** this is meaningfully stronger than a cosmetic
 JS gate (the raw published file is genuine ciphertext, not just hidden
-HTML), but it's still a single shared password handled client-side —
-anyone who has it can share it, and a determined attacker could
-brute-force a weak password offline. Treat it as "keeps casual/unauthorized
-viewers out," not as enterprise access control. For real per-user access
-control, the earlier-discussed Cloudflare Access + Google login option
-is the stronger route.
+HTML), but it's still passwords checked client-side — anyone who has
+one can share it, a determined attacker could brute-force a weak one
+offline, and real two-factor login isn't possible without a server in
+front of the site. Treat it as "keeps casual/unauthorized viewers out,"
+not as enterprise access control. For real per-user accounts with 2FA,
+a server-side gate (Google Apps Script with Google login, or Cloudflare
+Access) is the route.
 
 ## Filtering & calculation rules baked into the script
 
@@ -285,4 +301,7 @@ labels); city and area names stay as they appear in the source data.
 - `password.local.js` — the real dashboard password (you create this from the `.example` file below, gitignored, never committed)
 - `password.local.js.example` — template for `password.local.js`
 - `dashboard.html` — the dashboard itself, open this in a browser
+- `dashboard.js` — the dashboard's code (kept out of the HTML so the Content-Security-Policy can forbid inline scripts)
+- `chart.umd.js` — Chart.js 4.4.0, bundled locally instead of loaded from a CDN
+- `crypto-js.min.js` — only used to read `dashboard_data.enc` files written by the old v1 `encrypt.js`
 - `service-account.json` — your credentials (you provide this, keep it private, gitignored)
