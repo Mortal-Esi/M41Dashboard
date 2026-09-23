@@ -2267,10 +2267,19 @@ function drawCharts(){
         const labels = ['Top Critical','Critical','Other','Kitchen'];
         const values = [seg.TopCritical, seg.Critical, seg.Other, cpo.overall.kitchen.total].map(m => m ? m.m4oOrders : 0);
         const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other, CPO_SEGMENT_COLORS.Kitchen];
+        const ordersTotal = values.reduce((a,b)=>a+b,0);
         charts.cpoSegmentOrdersChart = new Chart(ctx3, {
           type:'doughnut',
           data:{ labels, datasets:[{ data: values, backgroundColor: colors, borderWidth:0 }]},
-          options:{ plugins:{ legend:{ position:'right', labels:{ boxWidth:10, padding:12 } } } }
+          options:{ plugins:{
+            legend:{ position:'right', labels:{ boxWidth:10, padding:12,
+              generateLabels:(chart)=> chart.data.labels.map((label,i)=>({
+                text:`${label} (${ordersTotal?pct1(values[i]/ordersTotal*100):'0.0%'})`,
+                fillStyle: colors[i], strokeStyle: colors[i], index:i,
+              })),
+            } },
+            tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${ordersTotal?pct1(values[c.dataIndex]/ordersTotal*100):'0.0%'}` } },
+          } }
         });
       }
       const ctx4 = document.getElementById('cpoCityOrdersChart');
