@@ -335,6 +335,74 @@ const TC_SEGMENT_BADGE = { 'Highly Engaged':'status-Elite', 'Moderate Engaged':'
 function tcSegmentBadge(seg){
   return `<span class="badge ${TC_SEGMENT_BADGE[seg] || 'seg-Unknown'}">${escapeHtml(seg)}</span>`;
 }
+// Pro / Non-Pro split of MotherVendors rows (one row per vendor), for the
+// current Yesterday/MTD window and Vendor Type filter.
+function proSplit(rows){
+  const f = orderWindow === 'yesterday' ? { m41:'m41Y', plat:'platY' } : { m41:'m41Mtd', plat:'platMtd' };
+  const g = { pro:{ vendors:0, ordered:0, m41:0, plat:0 }, nonPro:{ vendors:0, ordered:0, m41:0, plat:0 } };
+  rows.filter(matchesSuperType).forEach(r => {
+    const x = r.isPro ? g.pro : g.nonPro;
+    x.vendors++;
+    if(r[f.m41] > 0) x.ordered++;
+    x.m41 += r[f.m41];
+    x.plat += r[f.plat];
+  });
+  return g;
+}
+// Data generated before IsPro was exported has no isPro field — every row would
+// silently count as Non-Pro, so the section is hidden instead.
+function hasProData(){
+  const os = DATA.orderShare;
+  for(const c of Object.values(os.byCity)) for(const a of Object.values(c.areas)) if(a.rows.length) return 'isPro' in a.rows[0];
+  return false;
+}
+function proEngagementCell(x){
+  return x.plat ? shareToPct(x.m41 / x.plat) : '<span class="dim">—</span>';
+}
+function proSplitTable(split){
+  const total = split.pro.m41 + split.nonPro.m41;
+  const row = (label, x, cls) => `<tr>
+    <td><span class="badge ${cls}">${label}</span></td>
+    <td style="font-family:var(--mono)">${fmt(x.vendors)}</td>
+    <td style="font-family:var(--mono)">${fmt(x.ordered)} <span class="dim">(${pct1(x.vendors ? x.ordered/x.vendors*100 : 0)})</span></td>
+    <td style="font-family:var(--mono)">${fmt(x.m41)}</td>
+    <td style="font-family:var(--mono); color:var(--seg-b)">${pct1(total ? x.m41/total*100 : 0)}</td>
+    <td style="font-family:var(--mono)">${fmt(x.plat)}</td>
+    <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${proEngagementCell(x)}</td>
+  </tr>`;
+  return `<div class="table-wrap" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>Group</th><th>Vendors</th><th>Ordered Vendors</th><th>M4O Orders</th><th>Share of M4O Orders</th><th>Platform Orders</th><th>Vendor Engagement</th></tr></thead>
+      <tbody>${row('Pro', split.pro, 'status-Elite')}${row('Non-Pro', split.nonPro, 'seg-Unknown')}</tbody>
+    </table>
+  </div>`;
+}
+function proBreakdownTable(labelHeader, entries){
+  return `<div class="table-wrap">
+    <table>
+      <thead><tr><th>${labelHeader}</th><th>Pro Vendors</th><th>Pro M4O Orders</th><th>Pro Engagement</th><th>Non-Pro Vendors</th><th>Non-Pro M4O Orders</th><th>Non-Pro Engagement</th><th>Pro Share of M4O Orders</th></tr></thead>
+      <tbody>
+        ${entries.map(([label, g]) => {
+          const total = g.pro.m41 + g.nonPro.m41;
+          return `<tr>
+            <td>${escapeHtml(label)}</td>
+            <td style="font-family:var(--mono)">${fmt(g.pro.vendors)}</td>
+            <td style="font-family:var(--mono)">${fmt(g.pro.m41)}</td>
+            <td style="font-family:var(--mono); color:var(--seg-a)">${proEngagementCell(g.pro)}</td>
+            <td style="font-family:var(--mono)">${fmt(g.nonPro.vendors)}</td>
+            <td style="font-family:var(--mono)">${fmt(g.nonPro.m41)}</td>
+            <td style="font-family:var(--mono)">${proEngagementCell(g.nonPro)}</td>
+            <td style="font-family:var(--mono); color:var(--seg-b)">${total ? pct1(g.pro.m41/total*100) : '<span class="dim">—</span>'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+function proSectionNote(){
+  return `<div class="section-note">From MotherVendors' IsPro flag (${orderWindow === 'yesterday' ? 'yesterday' : 'month to date'}). "Vendor Engagement" = M4O orders ÷ all platform orders of those vendors; "Share of M4O Orders" = that group's slice of all M4O orders.</div>`;
+}
+
 function tcEngagedCell(total, noOrder){
   if(!total) return '<span class="dim">—</span>';
   const engaged = total - noOrder;
@@ -438,7 +506,10 @@ function renderOverview(){
             </tr>`).join('')}
           </tbody>
         </table>
-      </div>`;
+      </div>
+      ${overviewProSection('Pro vs Non-Pro Vendors', 'City',
+        Object.values(osAll.byCity).flatMap(c => Object.values(c.areas).flatMap(a => a.rows)),
+        rows.map(r => r.city).filter(c => osAll.byCity[c]).map(c => [c, Object.values(osAll.byCity[c].areas).flatMap(a => a.rows)]))}`;
   }
 
   // City drilled in — Marketing Areas
@@ -512,7 +583,22 @@ function renderOverview(){
         </tbody>
       </table>
     </div>
+    ${osAll.byCity[city] ? overviewProSection(`Pro vs Non-Pro Vendors — ${city}`, 'Area',
+      Object.values(osAll.byCity[city].areas).flatMap(a => a.rows),
+      rows.map(r => r.area).filter(a => osAll.byCity[city].areas[a]).map(a => [a, osAll.byCity[city].areas[a].rows])) : ''}
     ${overviewTopCriticalSection(city, tcVendors)}`;
+}
+
+function overviewProSection(title, labelHeader, allRows, entries){
+  if(!hasProData()) return '';
+  const split = proSplit(allRows);
+  if(!split.pro.vendors && !split.nonPro.vendors) return '';
+  const breakdown = entries.map(([label, rs]) => [label, proSplit(rs)]).filter(([, g]) => g.pro.vendors || g.nonPro.vendors);
+  return `
+    <div class="section-title">${escapeHtml(title)}</div>
+    ${proSectionNote()}
+    ${proSplitTable(split)}
+    ${proBreakdownTable(labelHeader, breakdown)}`;
 }
 
 function overviewTopCriticalSection(city, tcVendors){
