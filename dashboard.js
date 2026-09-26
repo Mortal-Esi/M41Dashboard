@@ -2149,7 +2149,7 @@ function drawCharts(){
             legend:{ position:'right', labels:{ boxWidth:10, padding:12,
               generateLabels:(chart)=> chart.data.labels.map((label,i)=>({
                 text:`${label} (${segTotal?pct1(values[i]/segTotal*100):'0.0%'})`,
-                fillStyle: colors[i], strokeStyle: colors[i], index:i,
+                fillStyle: colors[i], strokeStyle: colors[i], fontColor: textColor, index:i,
               })),
             } },
             tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${segTotal?pct1(values[c.dataIndex]/segTotal*100):'0.0%'}` } },
@@ -2178,7 +2178,7 @@ function drawCharts(){
             legend:{ position:'right', labels:{ boxWidth:10, padding:12,
               generateLabels:(chart)=> chart.data.labels.map((label,i)=>({
                 text:`${label} (${ordersTotal?pct1(values[i]/ordersTotal*100):'0.0%'})`,
-                fillStyle: colors[i], strokeStyle: colors[i], index:i,
+                fillStyle: colors[i], strokeStyle: colors[i], fontColor: textColor, index:i,
               })),
             } },
             tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${ordersTotal?pct1(values[c.dataIndex]/ordersTotal*100):'0.0%'}` } },
