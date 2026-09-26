@@ -1206,14 +1206,12 @@ async function main() {
       m4oOrders_pct: pct(m4oOrders, ref.m4oOrders),
       cpo: m4oOrders ? totalBudget / m4oOrders : null,
       freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
-      subsidyCps: totalSold ? subsidyBudget / totalSold : null,
     };
   }
   function vendorCpoFields(v) {
     return {
       cpo: v.m4oOrders ? v.totalBudget / v.m4oOrders : null,
       freeDeliveryCpo: v.m4oOrders ? v.freeDeliveryBudget / v.m4oOrders : null,
-      subsidyCps: v.totalSold ? v.subsidyBudget / v.totalSold : null,
     };
   }
   const grandTotalRefs = cpoMetrics(cpoVendors); // self-referential: 100% of itself

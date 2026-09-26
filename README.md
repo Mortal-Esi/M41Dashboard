@@ -245,9 +245,9 @@ Access) is the route.
   Delivery Budget, Total Budget, CPO).
   - **CPO** = Total Budget ÷ M4O Orders (the sheet's own `new_cpo`).
   - **Free Delivery CPO** = Free Delivery Budget ÷ M4O Orders.
-  - **Subsidy Cost / Sold** = Subsidy Budget ÷ `TotalSold` — product
-    subsidy is spent per sold unit, not per order, so it isn't a
-    "CPO" in the usual sense.
+  - **Subsidy CPO** = Subsidy Budget ÷ M4O Orders. Total Budget is
+    exactly Subsidy + Free Delivery, so CPO = Subsidy CPO + Free
+    Delivery CPO.
   - **Every budget figure carries its % of the project-wide grand
     total for that same metric** next to the Toman amount (e.g.
     "12.3M T (18%)") — a raw amount alone doesn't say whether a city
