@@ -820,7 +820,9 @@ async function main() {
       'No Order': topcRaw.filter((r) => r.Segment === 'No Order').length,
     },
   };
-  // Ready-made per-city breakdown from the TC Eng Per City sheet.
+  // Ready-made per-city breakdown from the TC Eng Per City sheet. (Its
+  // highly_Share column is (Highly + Moderate) / Active, not Highly / Total,
+  // so the dashboard derives its own percentages from these counts instead.)
   const topCriticalEngagementByCity = {};
   for (const r of topcPerCityRaw) {
     if (!r.City) continue;
@@ -831,8 +833,27 @@ async function main() {
       lowEngaged: toNum(r.Low, 0),
       noOrder: toNum(r.No_Order, 0),
       active: toNum(r.Active_TC, 0),
-      highlyEngaged_pct: toNum(r.highly_Share, 0),
     };
+  }
+  // Vendor-level TC list per city. TC Eng's order columns cover the last 30
+  // days (DailyM41Orders = VendorM41Orders / 30), not the calendar month, and
+  // M41OrderShare is already a percentage. The Segment compares the daily
+  // average against the tier's Daily_Threshold (Highly = at/above it).
+  const topCriticalVendorsByCity = {};
+  for (const r of topcRaw) {
+    if (!r.City) continue;
+    (topCriticalVendorsByCity[r.City] = topCriticalVendorsByCity[r.City] || []).push({
+      id: r.VendorID,
+      name: r.VendorTitle,
+      area: r.MarketingAreaName || 'Unknown',
+      tier: r.Tier || 'Unknown',
+      segment: r.Segment || 'Unknown',
+      m41Orders30d: toNum(r.VendorM41Orders, 0),
+      platformOrders30d: toNum(r.VendorPlatformOrders, 0),
+      m41Share_pct: toNum(r.M41OrderShare, 0),
+      dailyM41: toNum(r.DailyM41Orders, 0),
+      dailyTarget: toNum(r.Daily_Threshold, 0),
+    });
   }
 
   // ============================================================
@@ -1257,6 +1278,7 @@ async function main() {
     },
     topCriticalEngagement,
     topCriticalEngagementByCity,
+    topCriticalVendorsByCity,
     kitchen: kitchenModule,
     coverageModel,
     impression: impressionModule,
