@@ -220,7 +220,7 @@ function packStatsBlock(rows) {
   const discSub = rows.filter((r) => r._IsDiscountSubsidy).length;
   const coupSub = rows.filter((r) => r._IsCouponSubsidy).length;
   const kitchen = rows.filter((r) => r._IsKitchen).length;
-  // Availability: of the packs that are Activity==1 right now, what share were
+  // Availability: of the packs that are active right now (Activity==1, not deleted), what share were
   // actually shown to a user at least once (i.e. picked up an impression)?
   // A low number here means "marked active" isn't the same as "actually surfaced".
   const activeRows = rows.filter((r) => r._IsActive);
@@ -397,11 +397,11 @@ async function main() {
     console.log(`  Skipped — could not read the Delivery sheet (${err.message}). Share it with the service account as Viewer and set DELIVERY_SPREADSHEET_ID in config.local.js.`);
   }
 
-  // ---- FILTER RULE: Activity==1, OR PO>0, OR the pack has impressions ----
-  // (Activity==0/PO==0 packs that still got impressions were seen by users —
-  // not truly dead — so they're rescued into the dataset. See README.)
+  // ---- FILTER RULE: active (Activity==1 AND Deleted==0), OR PO>0, OR the pack has impressions ----
+  // (Inactive packs that still had orders or impressions yesterday were seen by
+  // users — not truly dead — so they're rescued into the dataset. See README.)
   for (const r of mainRaw) {
-    r._IsActive = toNum(r.Activity, 0) === 1;
+    r._IsActive = toNum(r.Activity, 0) === 1 && toNum(r.Deleted, 0) === 0;
     r._HasImpression = impressionPackIds.has(String(r.PackID));
   }
   const df = mainRaw.filter((r) => {

@@ -106,7 +106,8 @@ Access) is the route.
 
 ## Filtering & calculation rules baked into the script
 
-- **Pack filter**: keep a pack if `Activity == 1`, OR `PO > 0` (it had a
+- **Pack filter**: keep a pack if it's active (`Activity == 1` AND
+  `Deleted == 0`), OR `PO > 0` (it had a
   platform order yesterday despite being inactive now), OR the pack has
   impressions (its PackID appears in the Impression sheet — someone saw
   it yesterday, so it isn't truly dead even if Activity/PO both read 0).
@@ -275,7 +276,7 @@ Access) is the route.
     vendor segmentation.
 
 - **Availability** (Pack Distribution tab, all levels): of the packs
-  that are `Activity == 1` right now, what share actually picked up
+  that are active right now (`Activity == 1`, `Deleted == 0`), what share actually picked up
   at least one impression yesterday? A low number means "marked
   active in the sheet" isn't the same as "actually being shown to
   users." This directly answers whether Activity, Order (`PO`), and
