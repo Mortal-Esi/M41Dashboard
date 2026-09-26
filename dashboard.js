@@ -1637,6 +1637,10 @@ function renderKitchen(){
    ============================================================ */
 const CPO_SEGMENT_COLORS = { Kitchen:'#B389F2', TopCritical:'#FF5A36', Critical:'#F2B84B', Other:'#4C8CFF' };
 
+// Derived here from subsidyBudget / m4oOrders (present at every level) so it
+// also works on data files exported before this metric existed.
+function subsidyCpo(m){ return m.m4oOrders ? m.subsidyBudget / m.m4oOrders : null; }
+
 function cpoRow(label, m){
   return `<tr>
     <td>${escapeHtml(label)}</td>
@@ -1648,7 +1652,7 @@ function cpoRow(label, m){
     <td style="font-family:var(--mono)">${fmt(m.totalSold)}</td>
     <td style="font-family:var(--mono); color:var(--accent)">${m.cpo!==null ? tomanCompact(m.cpo) : '<span class="dim">—</span>'}</td>
     <td style="font-family:var(--mono); color:var(--seg-b)">${m.freeDeliveryCpo!==null ? tomanCompact(m.freeDeliveryCpo) : '<span class="dim">—</span>'}</td>
-    <td style="font-family:var(--mono); color:var(--purple)">${m.subsidyCps!==null ? tomanCompact(m.subsidyCps) : '<span class="dim">—</span>'}</td>
+    <td style="font-family:var(--mono); color:var(--purple)">${subsidyCpo(m)!==null ? tomanCompact(subsidyCpo(m)) : '<span class="dim">—</span>'}</td>
   </tr>`;
 }
 
@@ -1673,9 +1677,9 @@ function renderCpoBudget(){
         <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${tomanCompact(cpo.overall.all.freeDeliveryBudget)}<span class="pct-tag">${pct1(cpo.overall.all.freeDeliveryBudget_pct)}</span></div></div>
         <div class="stat-card"><div class="label">CPO</div><div class="value small">${cpo.overall.all.cpo!==null?tomanCompact(cpo.overall.all.cpo):'—'}</div></div>
         <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cpo.overall.all.freeDeliveryCpo!==null?tomanCompact(cpo.overall.all.freeDeliveryCpo):'—'}</div></div>
-        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cpo.overall.all.subsidyCps!==null?tomanCompact(cpo.overall.all.subsidyCps):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy CPO</div><div class="value small">${subsidyCpo(cpo.overall.all)!==null?tomanCompact(subsidyCpo(cpo.overall.all)):'—'}</div></div>
       </div>
-      <div class="section-note">CPO = Total Budget ÷ M4O Orders. Free Delivery CPO = Free Delivery Budget ÷ M4O Orders. Subsidy Cost/Sold = Subsidy Budget ÷ Total Sold (product subsidy is spent per sold unit, not per order, so it isn't a "CPO").</div>
+      <div class="section-note">CPO = Total Budget ÷ M4O Orders. Free Delivery CPO = Free Delivery Budget ÷ M4O Orders. Subsidy CPO = Subsidy Budget ÷ M4O Orders. Total Budget is exactly Subsidy + Free Delivery, so CPO = Subsidy CPO + Free Delivery CPO.</div>
       <div class="chart-row">
         <div class="chart-box"><h3>Total Budget by Segment</h3><canvas id="cpoSegmentChart"></canvas></div>
         <div class="chart-box"><h3>Total Budget by City</h3><canvas id="cpoCityChart"></canvas></div>
@@ -1688,11 +1692,11 @@ function renderCpoBudget(){
       <div class="section-note">Kitchen vendors have a structurally different cost model, so they're kept as their own line rather than mixed into the Non-Kitchen segments. Non-Kitchen collapses to three buckets: Top Critical, Critical, and Other (Important + Ordinary).</div>
       <div class="table-wrap" style="margin-bottom:22px">
         <table>
-          <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
+          <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy CPO</th></tr></thead>
           <tbody>
-            ${cpoRow('Top Critical', seg.TopCritical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
-            ${cpoRow('Critical', seg.Critical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
-            ${cpoRow('Other (Important + Ordinary)', seg.Other || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null,subsidyCps:null})}
+            ${cpoRow('Top Critical', seg.TopCritical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
+            ${cpoRow('Critical', seg.Critical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
+            ${cpoRow('Other (Important + Ordinary)', seg.Other || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
             ${cpoRow('Non-Kitchen (all)', nk.total)}
             ${cpoRow('Kitchen', kAll)}
           </tbody>
@@ -1715,7 +1719,7 @@ function renderCpoBudget(){
         <div class="stat-card"><div class="label">Free Delivery Budget</div><div class="value small">${tomanCompact(cdata.freeDeliveryBudget)}<span class="pct-tag">${pct1(cdata.freeDeliveryBudget_pct)}</span></div></div>
         <div class="stat-card"><div class="label">CPO</div><div class="value small">${cdata.cpo!==null?tomanCompact(cdata.cpo):'—'}</div></div>
         <div class="stat-card seg-b"><div class="label">Free Delivery CPO</div><div class="value small">${cdata.freeDeliveryCpo!==null?tomanCompact(cdata.freeDeliveryCpo):'—'}</div></div>
-        <div class="stat-card purple"><div class="label">Subsidy Cost / Sold</div><div class="value small">${cdata.subsidyCps!==null?tomanCompact(cdata.subsidyCps):'—'}</div></div>
+        <div class="stat-card purple"><div class="label">Subsidy CPO</div><div class="value small">${subsidyCpo(cdata)!==null?tomanCompact(subsidyCpo(cdata)):'—'}</div></div>
       </div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
       <div class="card-grid">
@@ -1736,7 +1740,7 @@ function renderCpoBudget(){
     <input class="search-box" id="cpoVendorSearch" placeholder="Filter vendors by name…">
     <div class="table-wrap">
       <table id="cpoVendorTable">
-        <thead><tr><th>Vendor</th><th>Vendor Class</th><th>Tier</th><th>New Class</th><th>Kitchen</th><th>M4O Orders</th><th>Total Sold</th><th>Total Budget</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy Cost/Sold</th></tr></thead>
+        <thead><tr><th>Vendor</th><th>Vendor Class</th><th>Tier</th><th>New Class</th><th>Kitchen</th><th>M4O Orders</th><th>Total Sold</th><th>Total Budget</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy CPO</th></tr></thead>
         <tbody>
           ${vendors.map(v => `<tr data-name="${escapeHtml(v.name.toLowerCase())}">
             <td>${escapeHtml(v.name)}</td>
@@ -1749,7 +1753,7 @@ function renderCpoBudget(){
             <td style="font-family:var(--mono); font-weight:600">${tomanCompact(v.totalBudget)}</td>
             <td style="font-family:var(--mono); color:var(--accent)">${v.cpo!==null?tomanCompact(v.cpo):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--seg-b)">${v.freeDeliveryCpo!==null?tomanCompact(v.freeDeliveryCpo):'<span class="dim">—</span>'}</td>
-            <td style="font-family:var(--mono); color:var(--purple)">${v.subsidyCps!==null?tomanCompact(v.subsidyCps):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono); color:var(--purple)">${subsidyCpo(v)!==null?tomanCompact(subsidyCpo(v)):'<span class="dim">—</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
