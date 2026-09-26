@@ -330,6 +330,17 @@ function overviewStatusBadge(status){
   return status ? `<span class="badge status-${escapeAttr(status)}">${escapeHtml(status)}</span>` : '<span class="dim">—</span>';
 }
 
+const TC_SEGMENT_ORDER = ['Highly Engaged','Moderate Engaged','Low Engaged','No Order'];
+const TC_SEGMENT_BADGE = { 'Highly Engaged':'status-Elite', 'Moderate Engaged':'status-Moderate', 'Low Engaged':'status-Low', 'No Order':'seg-Unknown' };
+function tcSegmentBadge(seg){
+  return `<span class="badge ${TC_SEGMENT_BADGE[seg] || 'seg-Unknown'}">${escapeHtml(seg)}</span>`;
+}
+function tcEngagedCell(total, noOrder){
+  if(!total) return '<span class="dim">—</span>';
+  const engaged = total - noOrder;
+  return `${fmt(engaged)} / ${fmt(total)} <span class="dim">(${pct1(engaged/total*100)})</span>`;
+}
+
 function renderOverview(){
   const d = drill.overview;
   const filtered = superTypeFilter !== 'all';
@@ -383,10 +394,12 @@ function renderOverview(){
     const overallAllCitiesShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.allCitiesShare:osAll.overallMtd.allCitiesShare) : undefined;
     const totalBudget = cpoAll ? cpoAll.overall.all.totalBudget : null;
     const overallCpo = cpoAll ? cpoAll.overall.all.cpo : null;
+    const tc = DATA.topCriticalEngagement;
+    const tcByCity = DATA.topCriticalEngagementByCity || {};
 
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, budget and coverage together, per city and Marketing Area.${!filtered ? '' : ' Budget, CPO and Coverage figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
+      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, Top Critical engagement, budget and coverage together, per city and Marketing Area.${!filtered ? '' : ' Budget, CPO, Coverage and Top Critical figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
       <div class="flex-between">
         <div class="section-title" style="margin:0">Overview</div>
         <div class="toggle-group">
@@ -402,12 +415,13 @@ function renderOverview(){
         <div class="stat-card purple"><div class="label">Vendor Engagement</div><div class="value small">${shareToPct(overallShare)}</div></div>
         ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${overallAllCitiesShare !== undefined ? `<div class="stat-card"><div class="label">Order Share (All Cities)</div><div class="value small">${overallAllCitiesShare!==null?shareToPct(overallAllCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
+        ${tc ? `<div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value small">${shareToPct(tc.rate)}</div><div class="sub">${fmt(tc.numerator)} / ${fmt(tc.denominator)} ordered M4O (30 days)</div></div>` : ''}
         ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
         ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">Overall CPO</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>TC Engaged</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
           <tbody>
             ${rows.map(r => `<tr class="clickable" data-action="ov-city" data-city="${escapeAttr(r.city)}">
               <td>${escapeHtml(r.city)}</td>
@@ -417,6 +431,7 @@ function renderOverview(){
               <td style="font-family:var(--mono)">${fmt(r.m41Orders)}</td>
               <td style="font-family:var(--mono); color:var(--purple)">${r.platformOrders?shareToPct(r.share):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono); color:var(--seg-b)">${r.m4oCitiesShare!==undefined && r.m4oCitiesShare!==null?shareToPct(r.m4oCitiesShare):'<span class="dim">—</span>'}</td>
+              <td style="font-family:var(--mono)">${tcByCity[r.city] ? tcEngagedCell(tcByCity[r.city].total, tcByCity[r.city].noOrder) : '<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono)">${r.cpo?tomanCompact(r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono); color:var(--accent)">${r.cpo&&r.cpo.cpo!==null?tomanCompact(r.cpo.cpo):'<span class="dim">—</span>'}</td>
               <td>${overviewStatusBadge(r.status)}</td>
@@ -460,6 +475,14 @@ function renderOverview(){
     return { area, vendors, packs, avgRate, m41Orders, platformOrders, share, areaM4OShare, cpo: cpoArea, status };
   }).filter(r => r.vendors > 0 || r.packs > 0).sort((a,b)=> b.vendors - a.vendors);
 
+  const tcVendors = (DATA.topCriticalVendorsByCity && DATA.topCriticalVendorsByCity[city]) || [];
+  const tcByArea = {};
+  tcVendors.forEach(v => {
+    const a = tcByArea[v.area] = tcByArea[v.area] || { total:0, noOrder:0 };
+    a.total++;
+    if(v.segment === 'No Order') a.noOrder++;
+  });
+
   return `
     ${breadcrumb(['All Cities', city], ['ov-city-null'])}
     <div class="flex-between">
@@ -471,7 +494,7 @@ function renderOverview(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
         <tbody>
           ${rows.map(r => `<tr>
             <td>${escapeHtml(r.area)}</td>
@@ -481,9 +504,51 @@ function renderOverview(){
             <td style="font-family:var(--mono)">${fmt(r.m41Orders)}</td>
             <td style="font-family:var(--mono); color:var(--purple)">${r.platformOrders?shareToPct(r.share):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--seg-b)">${r.areaM4OShare!==undefined?shareToPct(r.areaM4OShare):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${tcByArea[r.area] ? tcEngagedCell(tcByArea[r.area].total, tcByArea[r.area].noOrder) : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${r.cpo?tomanCompact(r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--accent)">${r.cpo&&r.cpo.cpo!==null?tomanCompact(r.cpo.cpo):'<span class="dim">—</span>'}</td>
             <td>${overviewStatusBadge(r.status)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${overviewTopCriticalSection(city, tcVendors)}`;
+}
+
+function overviewTopCriticalSection(city, tcVendors){
+  if(!DATA.topCriticalVendorsByCity) return '';
+  if(!tcVendors.length){
+    return `<div class="section-title">Top Critical Vendors</div><div class="section-note">No Top Critical vendors in ${escapeHtml(city)}.</div>`;
+  }
+  const count = seg => tcVendors.filter(v => v.segment === seg).length;
+  const total = tcVendors.length;
+  const noOrder = count('No Order');
+  const rank = seg => { const i = TC_SEGMENT_ORDER.indexOf(seg); return i < 0 ? TC_SEGMENT_ORDER.length : i; };
+  const sorted = [...tcVendors].sort((a,b) => rank(a.segment) - rank(b.segment) || b.m41Orders30d - a.m41Orders30d);
+  return `
+    <div class="section-title">Top Critical Vendors (${total})</div>
+    <div class="stat-row">
+      <div class="stat-card accent"><div class="label">Engagement Rate</div><div class="value small">${pct1((total - noOrder)/total*100)}</div><div class="sub">${fmt(total - noOrder)} / ${fmt(total)} ordered M4O</div></div>
+      <div class="stat-card seg-a"><div class="label">Highly Engaged</div><div class="value small">${fmt(count('Highly Engaged'))}</div></div>
+      <div class="stat-card warn"><div class="label">Moderate</div><div class="value small">${fmt(count('Moderate Engaged'))}</div></div>
+      <div class="stat-card"><div class="label">Low</div><div class="value small">${fmt(count('Low Engaged'))}</div></div>
+      <div class="stat-card"><div class="label">No Order</div><div class="value small">${fmt(noOrder)}</div></div>
+    </div>
+    <div class="section-note">Last 30 days, from the TC Eng sheet. Each vendor's average daily M4O orders is compared to its tier's daily target: Highly = at or above it, Moderate = just under, Low = well under, No Order = none.</div>
+    <input class="search-box" id="ovTcSearch" placeholder="Filter Top Critical vendors by name…">
+    <div class="table-wrap">
+      <table id="ovTcTable">
+        <thead><tr><th>Vendor</th><th>Marketing Area</th><th>Tier</th><th>Engagement</th><th>M4O Orders (30d)</th><th>Platform Orders (30d)</th><th>M4O Share</th><th>Daily M4O / Target</th></tr></thead>
+        <tbody>
+          ${sorted.map(v => `<tr data-name="${escapeHtml((v.name||'').toLowerCase())}">
+            <td>${escapeHtml(v.name)}</td>
+            <td>${escapeHtml(v.area)}</td>
+            <td>${escapeHtml(v.tier)}</td>
+            <td>${tcSegmentBadge(v.segment)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.m41Orders30d)}</td>
+            <td style="font-family:var(--mono)">${fmt(v.platformOrders30d)}</td>
+            <td style="font-family:var(--mono); color:var(--accent)">${pct1(v.m41Share_pct)}</td>
+            <td style="font-family:var(--mono)">${v.dailyM41.toFixed(1)} / ${fmt(v.dailyTarget)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -1285,7 +1350,7 @@ function renderOrderShare(){
     <div class="section-title">Top Critical Engagement by City</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>City</th><th>Total TC</th><th>Highly Engaged</th><th>Moderate</th><th>Low</th><th>No Order</th><th>Highly Engaged %</th></tr></thead>
+        <thead><tr><th>City</th><th>Total TC</th><th>Highly Engaged</th><th>Moderate</th><th>Low</th><th>No Order</th><th>Engagement Rate</th><th>Highly Engaged %</th></tr></thead>
         <tbody>
           ${Object.entries(DATA.topCriticalEngagementByCity).sort((a,b)=>b[1].total-a[1].total).map(([city,v]) => `<tr>
             <td>${escapeHtml(city)}</td>
@@ -1294,7 +1359,8 @@ function renderOrderShare(){
             <td style="font-family:var(--mono)">${fmt(v.moderateEngaged)}</td>
             <td style="font-family:var(--mono)">${fmt(v.lowEngaged)}</td>
             <td style="font-family:var(--mono); color:var(--text-faint)">${fmt(v.noOrder)}</td>
-            <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${pct1(v.highlyEngaged_pct)}</td>
+            <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${pct1(v.total ? (v.total - v.noOrder)/v.total*100 : 0)}</td>
+            <td style="font-family:var(--mono); color:var(--seg-a)">${pct1(v.total ? v.highlyEngaged/v.total*100 : 0)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -1911,6 +1977,8 @@ function attachHandlers(){
   if(impConvSearch) impConvSearch.addEventListener('input', () => filterTable('impConvTable', impConvSearch.value));
   const cpoVendorSearch = document.getElementById('cpoVendorSearch');
   if(cpoVendorSearch) cpoVendorSearch.addEventListener('input', () => filterTable('cpoVendorTable', cpoVendorSearch.value));
+  const ovTcSearch = document.getElementById('ovTcSearch');
+  if(ovTcSearch) ovTcSearch.addEventListener('input', () => filterTable('ovTcTable', ovTcSearch.value));
   const deliveryVendorSearch = document.getElementById('deliveryVendorSearch');
   if(deliveryVendorSearch) deliveryVendorSearch.addEventListener('input', () => filterTable('deliveryVendorTable', deliveryVendorSearch.value));
 
