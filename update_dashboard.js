@@ -667,7 +667,7 @@ async function main() {
         vendorCount: new Set(aRows.map((r) => r.VendorID)).size,
         yesterday: { ...wsY, areaPlatformOrders: areaPlatformY, areaM4OShare: areaPlatformY ? wsY.m41Orders / areaPlatformY : 0 },
         mtd: { ...wsMtd, areaPlatformOrders: areaPlatformMtd, areaM4OShare: areaPlatformMtd ? wsMtd.m41Orders / areaPlatformMtd : 0 },
-        rows: aRows.map((r) => ({ superTypeId: toNum(r.SuperTypeID, null), m41Y: toNum(r.M41VO, 0), platY: toNum(r.VPFO, 0), m41Mtd: toNum(r.NewMonthM41VO, 0), platMtd: toNum(r.NewMonthVPFO, 0) })),
+        rows: aRows.map((r) => ({ superTypeId: toNum(r.SuperTypeID, null), isPro: toNum(r.IsPro, 0) === 1, m41Y: toNum(r.M41VO, 0), platY: toNum(r.VPFO, 0), m41Mtd: toNum(r.NewMonthM41VO, 0), platMtd: toNum(r.NewMonthVPFO, 0) })),
       };
     }
     const areaPlatformYCity = areaPlatformTotal(cRows, 'AreaPlatformOrders');
