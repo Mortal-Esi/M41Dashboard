@@ -306,3 +306,9 @@ labels); city and area names stay as they appear in the source data.
 - `chart.umd.js` — Chart.js 4.4.0, bundled locally instead of loaded from a CDN
 - `crypto-js.min.js` — only used to read `dashboard_data.enc` files written by the old v1 `encrypt.js`
 - `service-account.json` — your credentials (you provide this, keep it private, gitignored)
+
+## Coverage History & Lead Tracking
+
+- **Coverage History** reads `COVERAGE_HISTORY_SPREADSHEET_ID` (one tab per day, named `YYYY-MM-DD`, same columns as CoverageResult plus `TopAreas`). The last 60 non-empty days are kept. City and All Cities figures are user-weighted sums of the area rows; "Top Areas" = rows with `TopAreas = 1`.
+- **Lead Tracking** reads `LEADS_SPREADSHEET_ID`: every `Lead Pool (<Month>)` tab, `Overview` (city targets, applied to the latest month only) and `Done_Packs`. Per lead vendor: live packs (Deleted = 0), packs created in that month, active packs (Activity = 1 and Deleted = 0), and M4O orders MTD (max of Lead Pool and Done_Packs).
+- **Jira status** comes from the local Jira export: put the newest `Daily*.xlsx` next to `update_dashboard.js` (the newest by modified time is used; it is gitignored). The latest issue per vendor (by Created) gives the status, lead type and agent. Without the file, leads still build, just without Jira status.

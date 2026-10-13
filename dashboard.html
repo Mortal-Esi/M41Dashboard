@@ -122,6 +122,7 @@
   .badge.vc-Important{ background:rgba(76,140,255,.14); color:var(--seg-b); }
   .badge.vc-Ordinary, .badge.vc-Unknown{ background:rgba(74,82,102,.3); color:var(--text-faint); }
   .dim{ color:var(--text-faint); }
+  tr.selected td{ background:rgba(255,90,54,.08); }
 
   .section-title{ font-size:13px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em; margin:32px 0 14px; }
   .section-title:first-child{ margin-top:0; }
@@ -132,7 +133,7 @@
   .chart-box h3{ font-size:13px; color:var(--text-dim); font-weight:600; margin-bottom:14px; }
   .chart-box canvas{ max-height:260px; }
 
-  .toggle-group{ display:inline-flex; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:3px; gap:2px; }
+  .toggle-group{ display:inline-flex; flex-wrap:wrap; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:3px; gap:2px; }
   .toggle-btn{ padding:6px 14px; font-size:12.5px; border-radius:6px; cursor:pointer; color:var(--text-dim); transition:all .12s; }
   .toggle-btn.active{ background:var(--accent); color:#fff; font-weight:600; }
 
@@ -204,6 +205,8 @@
   <div class="tab" data-panel="kitchen">Kitchen</div>
   <div class="tab" data-panel="cpoBudget">CPO Budget</div>
   <div class="tab" data-panel="coverageModel">Coverage Model</div>
+  <div class="tab" data-panel="coverageHistory">Coverage History</div>
+  <div class="tab" data-panel="leads">Lead Tracking</div>
   <div class="tab" data-panel="delivery">Delivery</div>
 </div>
 

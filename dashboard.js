@@ -3,7 +3,7 @@
    ============================================================ */
 let DATA = null;
 let currentPanel = 'overview';
-let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null} };
+let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null}, coverageHistory:{city:null,area:null}, leads:{group:null,groupBy:null} };
 let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion'
 let orderWindow = 'mtd';
 let deliveryDate = null; // set to the latest available date on first render of the Delivery tab
@@ -214,7 +214,7 @@ function renderFilterBar(){
   });
 }
 function filterBarVisible(){
-  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen' || currentPanel === 'cpoBudget') ? 'none' : '';
+  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen' || currentPanel === 'cpoBudget' || currentPanel === 'coverageHistory' || currentPanel === 'leads') ? 'none' : '';
 }
 function matchesSuperType(item){
   if(superTypeFilter === 'all') return true;
@@ -253,6 +253,8 @@ function render(){
   else if(currentPanel === 'cpoBudget') root.innerHTML = renderCpoBudget();
   else if(currentPanel === 'coverageModel') root.innerHTML = renderCoverageModel();
   else if(currentPanel === 'delivery') root.innerHTML = renderDelivery();
+  else if(currentPanel === 'coverageHistory') root.innerHTML = renderCoverageHistory();
+  else if(currentPanel === 'leads') root.innerHTML = renderLeads();
   attachHandlers();
 }
 
@@ -1956,6 +1958,412 @@ function renderDelivery(){
 }
 
 /* ============================================================
+   MODULE: COVERAGE HISTORY (daily area-coverage snapshots)
+   ============================================================ */
+let covHistScope = 'all'; // 'all' | 'top'
+let covHistRange = 30;    // days back from the latest snapshot; 0 = everything kept
+const COV_KEYS = ['Elite','Healthy','Moderate','Low'];
+
+function covHistDateIdx(ch){
+  if(!covHistRange) return ch.dates.map((_,i)=>i);
+  const last = Date.parse(ch.dates[ch.dates.length-1]);
+  const cutoff = last - covHistRange*86400000;
+  return ch.dates.map((d,i)=>[d,i]).filter(([d]) => Date.parse(d) >= cutoff).map(([,i])=>i);
+}
+function firstNonNull(arr, idx){ for(const i of idx) if(arr[i]) return arr[i]; return null; }
+function lastNonNull(arr, idx){ for(let k=idx.length-1;k>=0;k--) if(arr[idx[k]]) return arr[idx[k]]; return null; }
+// Area-level arrays are [status, users, E%, H%, M%, L%]; city/all aggregates are {users, pct:[E,H,M,L], areaStatus}.
+function covPct(x){ return !x ? null : Array.isArray(x) ? x.slice(2,6) : x.pct; }
+function covDelta(now, then, i, invert){
+  if(!now || !then) return '';
+  const d = Math.round((covPct(now)[i] - covPct(then)[i])*10)/10;
+  if(!d) return ` <span class="dim">(±0)</span>`;
+  const good = invert ? d < 0 : d > 0;
+  return ` <span style="color:${good?'var(--seg-a)':'var(--deal-weak)'}">(${d>0?'+':''}${d.toFixed(1)})</span>`;
+}
+function covHistSeries(){
+  const ch = DATA.coverageHistory, d = drill.coverageHistory;
+  if(d.city && d.area){ const a = ch.cities[d.city] && ch.cities[d.city].areas[d.area]; return a ? a.days : []; }
+  if(d.city){ const c = ch.cities[d.city]; return c ? c[covHistScope] : []; }
+  return ch.allCities[covHistScope];
+}
+
+function renderCoverageHistory(){
+  const ch = DATA.coverageHistory;
+  if(!ch || !ch.dates || !ch.dates.length){
+    return `<div class="empty-state">No Coverage history available. Set COVERAGE_HISTORY_SPREADSHEET_ID in config.local.js, share the sheet with the service account, then re-run <code>node update_dashboard.js</code>.</div>`;
+  }
+  const d = drill.coverageHistory;
+  const idx = covHistDateIdx(ch);
+  const fromDate = ch.dates[idx[0]], toDate = ch.dates[idx[idx.length-1]];
+  const controls = `<div class="flex-between">
+    <div class="section-note" style="margin:0">Share of users by coverage level, per daily snapshot (${idx.length} snapshot${idx.length===1?'':'s'}, ${escapeHtml(fromDate)} → ${escapeHtml(toDate)}). Changes in brackets are percentage points vs the first snapshot in range. Hover the charts for each day's values.</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      ${d.area ? '' : `<div class="toggle-group">
+        <div class="toggle-btn ${covHistScope==='all'?'active':''}" data-chscope="all">All Areas</div>
+        <div class="toggle-btn ${covHistScope==='top'?'active':''}" data-chscope="top">Top Areas</div>
+      </div>`}
+      <div class="toggle-group">
+        ${[[7,'7D'],[14,'14D'],[30,'30D'],[0,'All']].map(([n,l]) => `<div class="toggle-btn ${covHistRange===n?'active':''}" data-chrange="${n}">${l}</div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  const statCards = (series) => {
+    const now = lastNonNull(series, idx), then = firstNonNull(series, idx);
+    if(!now) return `<div class="section-note">No data for this selection in the chosen range.</div>`;
+    const p = covPct(now);
+    const users = Array.isArray(now) ? now[1] : now.users;
+    return `<div class="stat-row">
+      <div class="stat-card"><div class="label">Users</div><div class="value small">${fmt(users)}</div></div>
+      ${COV_KEYS.map((k,i) => `<div class="stat-card"><div class="label">${k}</div><div class="value small" style="color:${STATUS_COLORS[k]}">${p[i].toFixed(1)}%</div><div class="sub">${covDelta(now, then, i, i>=2).trim() || '&nbsp;'}</div></div>`).join('')}
+    </div>`;
+  };
+
+  if(!d.city){
+    const cities = Object.entries(ch.cities).map(([city,c]) => {
+      const s = c[covHistScope];
+      return { city, now:lastNonNull(s, idx), then:firstNonNull(s, idx) };
+    }).filter(r => r.now).sort((a,b)=> b.now.users - a.now.users);
+    return `
+      ${breadcrumb(['All Cities'])}
+      ${controls}
+      ${statCards(ch.allCities[covHistScope])}
+      <div class="chart-row">
+        <div class="chart-box"><h3>User Coverage Mix — All Cities</h3><canvas id="covHistPctChart"></canvas></div>
+        <div class="chart-box"><h3>Marketing Areas by Status</h3><canvas id="covHistStatusChart"></canvas></div>
+      </div>
+      <div class="section-title">Cities (${cities.length})</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>City</th><th>Users</th>${COV_KEYS.map(k=>`<th>${k} %</th>`).join('')}<th>Areas E / H / M / L</th></tr></thead>
+        <tbody>
+          ${cities.map(r => `<tr class="clickable" data-action="ch-city" data-city="${escapeAttr(r.city)}">
+            <td>${escapeHtml(r.city)}</td>
+            <td style="font-family:var(--mono)">${fmt(r.now.users)}</td>
+            ${COV_KEYS.map((k,i)=>`<td>${r.now.pct[i].toFixed(1)}%${covDelta(r.now, r.then, i, i>=2)}</td>`).join('')}
+            <td style="font-family:var(--mono)">${r.now.areaStatus.join(' / ')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  }
+
+  const c = ch.cities[d.city];
+  if(!c) return `<div class="empty-state">No Coverage history for ${escapeHtml(d.city)}.</div>`;
+
+  if(!d.area){
+    const areas = Object.entries(c.areas)
+      .filter(([,a]) => covHistScope==='all' || a.top)
+      .map(([area,a]) => ({ area, top:a.top, now:lastNonNull(a.days, idx), then:firstNonNull(a.days, idx) }))
+      .filter(r => r.now).sort((a,b)=> b.now[1] - a.now[1]);
+    return `
+      ${breadcrumb(['All Cities', d.city], ['ch-city-null'])}
+      ${controls}
+      ${statCards(c[covHistScope])}
+      <div class="chart-row">
+        <div class="chart-box"><h3>User Coverage Mix — ${escapeHtml(d.city)}</h3><canvas id="covHistPctChart"></canvas></div>
+        <div class="chart-box"><h3>Marketing Areas by Status</h3><canvas id="covHistStatusChart"></canvas></div>
+      </div>
+      <div class="section-title">Marketing Areas (${areas.length})</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Area</th><th>Status (${escapeHtml(fromDate)} → ${escapeHtml(toDate)})</th><th>Users</th>${COV_KEYS.map(k=>`<th>${k} %</th>`).join('')}</tr></thead>
+        <tbody>
+          ${areas.map(r => `<tr class="clickable" data-action="ch-area" data-area="${escapeAttr(r.area)}">
+            <td>${escapeHtml(r.area)}${r.top?' <span class="badge tc">Top</span>':''}</td>
+            <td>${r.then && r.then[0]!==r.now[0] ? `<span class="badge status-${escapeAttr(r.then[0])}">${escapeHtml(r.then[0])}</span> → ` : ''}<span class="badge status-${escapeAttr(r.now[0])}">${escapeHtml(r.now[0])}</span></td>
+            <td style="font-family:var(--mono)">${fmt(r.now[1])}</td>
+            ${COV_KEYS.map((k,i)=>`<td>${r.now[2+i].toFixed(1)}%${covDelta(r.now, r.then, i, i>=2)}</td>`).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  }
+
+  const a = c.areas[d.area];
+  if(!a) return `<div class="empty-state">No Coverage history for ${escapeHtml(d.area)}.</div>`;
+  const days = idx.filter(i => a.days[i]).reverse();
+  return `
+    ${breadcrumb(['All Cities', d.city, d.area], ['ch-city-null', 'ch-area-null'])}
+    ${controls}
+    ${statCards(a.days)}
+    <div class="chart-box" style="margin-bottom:22px"><h3>User Coverage Mix — ${escapeHtml(d.area)}</h3><canvas id="covHistPctChart"></canvas></div>
+    <div class="section-title">Daily Snapshots (${days.length})</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Status</th><th>Users</th>${COV_KEYS.map(k=>`<th>${k} %</th>`).join('')}</tr></thead>
+      <tbody>
+        ${days.map(i => { const x = a.days[i]; return `<tr>
+          <td style="font-family:var(--mono)">${escapeHtml(ch.dates[i])}</td>
+          <td><span class="badge status-${escapeAttr(x[0])}">${escapeHtml(x[0])}</span></td>
+          <td style="font-family:var(--mono)">${fmt(x[1])}</td>
+          ${COV_KEYS.map((k,j)=>`<td>${x[2+j].toFixed(1)}%</td>`).join('')}
+        </tr>`; }).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function drawCoverageHistoryCharts(gridColor){
+  const ch = DATA.coverageHistory;
+  if(!ch || !ch.dates) return;
+  const idx = covHistDateIdx(ch);
+  const series = covHistSeries();
+  const labels = idx.map(i => ch.dates[i].slice(5));
+  const ctx1 = document.getElementById('covHistPctChart');
+  if(ctx1){
+    charts.covHistPctChart = new Chart(ctx1, {
+      type:'line',
+      data:{ labels, datasets: COV_KEYS.map((k,j) => ({
+        label:k, data: idx.map(i => { const p = covPct(series[i]); return p ? p[j] : null; }),
+        borderColor:STATUS_COLORS[k], backgroundColor:STATUS_COLORS[k], tension:.25, pointRadius:2, spanGaps:true,
+      })) },
+      options:{ interaction:{mode:'index', intersect:false},
+        plugins:{ legend:{ labels:{ color:'#8B96A8', boxWidth:10 } }, tooltip:{ callbacks:{ label:(c)=>`${c.dataset.label}: ${c.parsed.y.toFixed(1)}%` } } },
+        scales:{ x:{grid:{display:false}}, y:{grid:{color:gridColor}, min:0, max:100, ticks:{ callback:(v)=>v+'%' }} } }
+    });
+  }
+  const ctx2 = document.getElementById('covHistStatusChart');
+  if(ctx2){
+    charts.covHistStatusChart = new Chart(ctx2, {
+      type:'bar',
+      data:{ labels, datasets: COV_KEYS.map((k,j) => ({
+        label:k, data: idx.map(i => series[i] ? series[i].areaStatus[j] : null), backgroundColor:STATUS_COLORS[k],
+      })) },
+      options:{ interaction:{mode:'index', intersect:false},
+        plugins:{ legend:{ labels:{ color:'#8B96A8', boxWidth:10 } } },
+        scales:{ x:{stacked:true, grid:{display:false}}, y:{stacked:true, grid:{color:gridColor}, title:{display:true,text:'areas'}} } }
+    });
+  }
+}
+
+/* ============================================================
+   MODULE: LEAD TRACKING (monthly lead pool → Jira → pack → order)
+   ============================================================ */
+let leadsMonth = null;
+let leadsGroupBy = 'city';
+let leadsStage = 'all';
+const LEAD_GROUPS = [
+  ['city','City'], ['assignee','Assignee'], ['tier','Tier'], ['cls','Vendor Class'],
+  ['leadType','Lead Type'], ['pro','Pro'], ['jiraStatus','Jira Status'],
+];
+const LEAD_STAGES = ['No Jira issue','In Jira','Jira Done, no pack','Pack inactive','Active, no order','Ordered'];
+const LEAD_STAGE_COLORS = { 'No Jira issue':'#4A5266', 'In Jira':'#F2B84B', 'Jira Done, no pack':'#B389F2', 'Pack inactive':'#E45A5A', 'Active, no order':'#4C8CFF', 'Ordered':'#3DDC97' };
+
+function leadStage(v){
+  if(v.orders > 0) return 'Ordered';
+  if(v.activePacks > 0) return 'Active, no order';
+  if(v.packs > 0) return 'Pack inactive';
+  if(v.jira && v.jira.status === 'Done') return 'Jira Done, no pack';
+  if(v.jira) return 'In Jira';
+  return 'No Jira issue';
+}
+function leadGroupKey(v, by){
+  if(by === 'pro') return v.pro ? 'Pro' : 'Non-Pro';
+  if(by === 'jiraStatus') return v.jira ? v.jira.status : '(no Jira issue)';
+  if(by === 'leadType') return v.leadType || '(unknown)';
+  return v[by] || '—';
+}
+function leadFunnel(vs){
+  const n = (f) => vs.filter(f).length;
+  return {
+    leads: vs.length,
+    jira: n(v => v.jira),
+    jiraDone: n(v => v.jira && v.jira.status === 'Done'),
+    packs: n(v => v.packs > 0),
+    packsInMonth: n(v => v.packsInMonth > 0),
+    active: n(v => v.activePacks > 0),
+    ordered: n(v => v.orders > 0),
+    activePackCount: vs.reduce((s,v) => s + v.activePacks, 0),
+    orders: vs.reduce((s,v) => s + v.orders, 0),
+  };
+}
+function leadsMonthData(){
+  const L = DATA.leads;
+  if(!leadsMonth || !L.byMonth[leadsMonth]) leadsMonth = L.months[L.months.length-1];
+  return L.byMonth[leadsMonth];
+}
+const ofPct = (n, d) => d ? ` <span class="dim">(${pct1(n/d*100)})</span>` : '';
+
+function renderLeads(){
+  const L = DATA.leads;
+  if(!L || !L.months || !L.months.length){
+    return `<div class="empty-state">No Lead Tracking data available. Set LEADS_SPREADSHEET_ID in config.local.js, share the sheet with the service account, then re-run <code>node update_dashboard.js</code>.</div>`;
+  }
+  const M = leadsMonthData();
+  const d = drill.leads;
+  const all = M.vendors;
+  const scoped = d.group === null ? all : all.filter(v => leadGroupKey(v, d.groupBy) === d.group);
+  const f = leadFunnel(scoped);
+  const targets = M.targets;
+  let tgt = null;
+  if(targets){
+    if(d.group === null) tgt = targets.__total__ || null;
+    else if(d.groupBy === 'city') tgt = targets[d.group] || null;
+  }
+  const js = L.jiraSource;
+  const jiraNote = js
+    ? `Jira status from <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC, ${fmt(js.issues)} issues; latest issue per vendor).`
+    : `<span style="color:var(--warn)">No Daily Jira file was found when the data was built — put the Jira export (Daily*.xlsx) next to update_dashboard.js.</span>`;
+
+  const head = `<div class="flex-between">
+    <div class="section-note" style="margin:0">Where each lead in the month's lead pool ended up. Pack and order figures come from Done_Packs (active = Activity 1 and not deleted; orders = M4O orders MTD). ${jiraNote}</div>
+    ${L.months.length > 1 ? `<select id="leadsMonthSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
+      ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
+    </select>` : ''}
+  </div>`;
+
+  const cards = `<div class="stat-row">
+    <div class="stat-card"><div class="label">Leads</div><div class="value small">${fmt(f.leads)}</div>${tgt ? `<div class="sub">Overview lead pool: ${fmt(tgt.leadPool)}</div>` : ''}</div>
+    <div class="stat-card warn"><div class="label">Jira Issue</div><div class="value small">${fmt(f.jira)}</div><div class="sub">${f.leads?pct1(f.jira/f.leads*100):'—'} of leads · ${fmt(f.jiraDone)} Done</div></div>
+    <div class="stat-card purple"><div class="label">Pack Built</div><div class="value small">${fmt(f.packs)}</div><div class="sub">${fmt(f.packsInMonth)} built in ${escapeHtml(M.label.split(' ')[0])}</div></div>
+    <div class="stat-card seg-b"><div class="label">Active Pack (vendors)</div><div class="value small">${fmt(f.active)}</div><div class="sub">${tgt ? `Target ${fmt(tgt.vendorTarget)} · ${tgt.vendorTarget?pct1(f.active/tgt.vendorTarget*100):'—'} achieved` : `${f.leads?pct1(f.active/f.leads*100):'—'} of leads`}</div></div>
+    <div class="stat-card"><div class="label">Active Packs</div><div class="value small">${fmt(f.activePackCount)}</div>${tgt ? `<div class="sub">Target ${fmt(tgt.packTarget)} · ${tgt.packTarget?pct1(f.activePackCount/tgt.packTarget*100):'—'} achieved</div>` : ''}</div>
+    <div class="stat-card seg-a"><div class="label">Ordered M4O</div><div class="value small">${fmt(f.ordered)}</div><div class="sub">${fmt(f.orders)} orders MTD</div></div>
+  </div>`;
+
+  const groups = new Map();
+  for(const v of all){
+    const k = leadGroupKey(v, leadsGroupBy);
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(v);
+  }
+  const showTargets = leadsGroupBy === 'city' && targets;
+  const groupRows = [...groups.entries()].map(([k,vs]) => ({ k, f:leadFunnel(vs), t: showTargets ? targets[k] : null }))
+    .sort((a,b)=> b.f.leads - a.f.leads);
+  const groupTable = `
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Breakdown</div>
+      <div class="toggle-group">
+        ${LEAD_GROUPS.map(([k,l]) => `<div class="toggle-btn ${leadsGroupBy===k?'active':''}" data-leadgroup="${k}">${l}</div>`).join('')}
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>${escapeHtml(LEAD_GROUPS.find(g=>g[0]===leadsGroupBy)[1])}</th><th>Leads</th><th>Jira Issue</th><th>Jira Done</th><th>Pack Built</th><th>Active Pack</th><th>Ordered</th><th>Orders</th>${showTargets?'<th>Vendor Target</th><th>Achieved</th><th>Active Packs / Target</th>':''}</tr></thead>
+      <tbody>
+        ${groupRows.map(r => `<tr class="clickable ${d.group===r.k && d.groupBy===leadsGroupBy?'selected':''}" data-action="ld-group" data-group="${escapeAttr(r.k)}">
+          <td>${escapeHtml(r.k)}</td>
+          <td style="font-family:var(--mono)">${fmt(r.f.leads)}</td>
+          <td>${fmt(r.f.jira)}${ofPct(r.f.jira, r.f.leads)}</td>
+          <td>${fmt(r.f.jiraDone)}</td>
+          <td>${fmt(r.f.packs)}</td>
+          <td>${fmt(r.f.active)}${ofPct(r.f.active, r.f.leads)}</td>
+          <td>${fmt(r.f.ordered)}${ofPct(r.f.ordered, r.f.leads)}</td>
+          <td style="font-family:var(--mono)">${fmt(r.f.orders)}</td>
+          ${showTargets ? (r.t ? `<td>${fmt(r.t.vendorTarget)}</td><td>${r.t.vendorTarget?pct1(r.f.active/r.t.vendorTarget*100):'—'}</td><td>${fmt(r.f.activePackCount)} / ${fmt(r.t.packTarget)}</td>` : '<td class="dim">—</td><td class="dim">—</td><td class="dim">—</td>') : ''}
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+
+  const stageCounts = LEAD_STAGES.map(s => [s, scoped.filter(v => leadStage(v) === s).length]);
+  const listed = (leadsStage === 'all' ? scoped : scoped.filter(v => leadStage(v) === leadsStage))
+    .slice().sort((a,b) => LEAD_STAGES.indexOf(leadStage(b)) - LEAD_STAGES.indexOf(leadStage(a)) || b.orders - a.orders || a.city.localeCompare(b.city));
+  const vendorTable = `
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Vendors (${fmt(listed.length)})</div>
+      <select id="leadsStageSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
+        <option value="all" ${leadsStage==='all'?'selected':''}>All stages (${fmt(scoped.length)})</option>
+        ${stageCounts.map(([s,n]) => `<option value="${escapeAttr(s)}" ${leadsStage===s?'selected':''}>${escapeHtml(s)} (${fmt(n)})</option>`).join('')}
+      </select>
+    </div>
+    <input class="search-box" id="leadsVendorSearch" placeholder="Filter by vendor, ID, area, assignee or Jira key…">
+    <div class="table-wrap"><table id="leadsVendorTable">
+      <thead><tr><th>Vendor</th><th>City</th><th>Area</th><th>Tier</th><th>Class</th><th>Assignee</th><th>Lead Type</th><th>Jira</th><th>Stage</th><th>Packs (live / this month)</th><th>Active</th><th>Orders</th></tr></thead>
+      <tbody>
+        ${listed.map(v => { const st = leadStage(v); return `<tr data-name="${escapeAttr([v.name, v.id, v.area, v.assignee, v.jira && v.jira.key].join(' ').toLowerCase())}">
+          <td>${escapeHtml(v.name)} <span class="dim">${escapeHtml(v.id)}</span>${v.pro?' <span class="badge sub-d">Pro</span>':''}</td>
+          <td>${escapeHtml(v.city)}</td>
+          <td>${escapeHtml(v.area)}</td>
+          <td><span class="badge seg-${escapeAttr(v.tier==='—'?'Unknown':v.tier)}">${escapeHtml(v.tier)}</span></td>
+          <td><span class="badge vc-${escapeAttr(v.cls)}">${escapeHtml(v.cls)}</span></td>
+          <td>${escapeHtml(v.assignee)}</td>
+          <td>${escapeHtml(v.leadType || '—')}</td>
+          <td>${v.jira ? `${escapeHtml(v.jira.status)} <span class="dim">${escapeHtml(v.jira.key||'')}${v.jira.issues>1?` · ${v.jira.issues} issues`:''}</span>` : '<span class="dim">—</span>'}</td>
+          <td><span class="badge" style="background:${LEAD_STAGE_COLORS[st]}26; color:${LEAD_STAGE_COLORS[st]}">${escapeHtml(st)}</span></td>
+          <td style="font-family:var(--mono)">${fmt(v.packs)} / ${fmt(v.packsInMonth)}</td>
+          <td style="font-family:var(--mono)">${fmt(v.activePacks)}</td>
+          <td style="font-family:var(--mono)">${fmt(v.orders)}</td>
+        </tr>`; }).join('')}
+      </tbody>
+    </table></div>`;
+
+  const crumbs = d.group === null
+    ? breadcrumb([M.label])
+    : breadcrumb([M.label, `${LEAD_GROUPS.find(g=>g[0]===d.groupBy)[1]}: ${d.group}`], ['ld-group-null']);
+  return `
+    ${crumbs}
+    ${head}
+    ${cards}
+    <div class="chart-row">
+      <div class="chart-box"><h3>Funnel</h3><canvas id="leadsFunnelChart"></canvas></div>
+      <div class="chart-box"><h3>Where Leads Are Now</h3><canvas id="leadsStageChart"></canvas></div>
+    </div>
+    ${groupTable}
+    ${vendorTable}`;
+}
+
+function drawLeadsCharts(gridColor, textColor){
+  if(!DATA.leads || !DATA.leads.months || !DATA.leads.months.length) return;
+  const M = leadsMonthData();
+  const d = drill.leads;
+  const scoped = d.group === null ? M.vendors : M.vendors.filter(v => leadGroupKey(v, d.groupBy) === d.group);
+  const f = leadFunnel(scoped);
+  const ctx1 = document.getElementById('leadsFunnelChart');
+  if(ctx1){
+    const labels = ['Leads','Jira issue','Jira Done','Pack built','Active pack','Ordered M4O'];
+    const vals = [f.leads, f.jira, f.jiraDone, f.packs, f.active, f.ordered];
+    charts.leadsFunnelChart = new Chart(ctx1, {
+      type:'bar',
+      data:{ labels, datasets:[{ data: vals, backgroundColor:['#8B96A8','#F2B84B','#B389F2','#E45A5A','#4C8CFF','#3DDC97'], borderRadius:4 }]},
+      options:{ indexAxis:'y', plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:(c)=>`${fmt(c.parsed.x)} (${f.leads?pct1(c.parsed.x/f.leads*100):'—'} of leads)` } } },
+        scales:{ x:{grid:{color:gridColor}}, y:{grid:{display:false}} } }
+    });
+  }
+  const ctx2 = document.getElementById('leadsStageChart');
+  if(ctx2){
+    const counts = LEAD_STAGES.map(s => scoped.filter(v => leadStage(v) === s).length);
+    const total = counts.reduce((a,b)=>a+b,0);
+    charts.leadsStageChart = new Chart(ctx2, {
+      type:'doughnut',
+      data:{ labels: LEAD_STAGES, datasets:[{ data: counts, backgroundColor: LEAD_STAGES.map(s => LEAD_STAGE_COLORS[s]), borderWidth:0 }]},
+      options:{ cutout:'60%', plugins:{
+        legend:{ position:'right', labels:{ boxWidth:10, color:textColor, generateLabels:(chart) => LEAD_STAGES.map((s,i) => ({
+          text:`${s}: ${fmt(counts[i])}`, fillStyle:LEAD_STAGE_COLORS[s], strokeStyle:LEAD_STAGE_COLORS[s], fontColor:textColor, index:i,
+          hidden: !chart.getDataVisibility(i),
+        })) } },
+        tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${fmt(c.parsed)} (${total?pct1(c.parsed/total*100):'—'})` } },
+      } }
+    });
+  }
+}
+
+function attachCoverageHistoryLeadsHandlers(){
+  document.querySelectorAll('[data-action="ch-city"]').forEach(el => {
+    el.addEventListener('click', () => { drill.coverageHistory.city = el.dataset.city; drill.coverageHistory.area = null; render(); });
+  });
+  document.querySelectorAll('[data-action="ch-area"]').forEach(el => {
+    el.addEventListener('click', () => { drill.coverageHistory.area = el.dataset.area; render(); });
+  });
+  document.querySelectorAll('[data-chscope]').forEach(el => {
+    el.addEventListener('click', () => { covHistScope = el.dataset.chscope; render(); });
+  });
+  document.querySelectorAll('[data-chrange]').forEach(el => {
+    el.addEventListener('click', () => { covHistRange = Number(el.dataset.chrange); render(); });
+  });
+  document.querySelectorAll('[data-leadgroup]').forEach(el => {
+    el.addEventListener('click', () => { leadsGroupBy = el.dataset.leadgroup; render(); });
+  });
+  document.querySelectorAll('[data-action="ld-group"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const same = drill.leads.group === el.dataset.group && drill.leads.groupBy === leadsGroupBy;
+      drill.leads = same ? { group:null, groupBy:null } : { group: el.dataset.group, groupBy: leadsGroupBy };
+      render();
+    });
+  });
+  const monthSel = document.getElementById('leadsMonthSelect');
+  if(monthSel) monthSel.addEventListener('change', () => { leadsMonth = monthSel.value; drill.leads = { group:null, groupBy:null }; render(); });
+  const stageSel = document.getElementById('leadsStageSelect');
+  if(stageSel) stageSel.addEventListener('change', () => { leadsStage = stageSel.value; render(); });
+  const leadsSearch = document.getElementById('leadsVendorSearch');
+  if(leadsSearch) leadsSearch.addEventListener('input', () => filterTable('leadsVendorTable', leadsSearch.value));
+}
+
+/* ============================================================
    HANDLERS + BREADCRUMB
    ============================================================ */
 function breadcrumb(labels, actions){
@@ -2045,6 +2453,8 @@ function attachHandlers(){
       if(module === 'os'){ if(level==='city') { drill.orderShare.city=null; } }
       if(module === 'imp'){ if(level==='city') { drill.impression.city=null; drill.impression.area=null; } if(level==='area'){ drill.impression.area=null; } }
       if(module === 'cpo'){ if(level==='city') { drill.cpoBudget.city=null; drill.cpoBudget.area=null; } if(level==='area'){ drill.cpoBudget.area=null; } }
+      if(module === 'ch'){ if(level==='city') { drill.coverageHistory.city=null; drill.coverageHistory.area=null; } if(level==='area'){ drill.coverageHistory.area=null; } }
+      if(module === 'ld'){ if(level==='group') { drill.leads = { group:null, groupBy:null }; } }
       if(module === 'dl'){
         if(level==='city') { drill.delivery.city=null; drill.delivery.area=null; drill.delivery.vendorId=null; }
         if(level==='area'){ drill.delivery.area=null; drill.delivery.vendorId=null; }
@@ -2072,6 +2482,7 @@ function attachHandlers(){
   const deliveryVendorSearch = document.getElementById('deliveryVendorSearch');
   if(deliveryVendorSearch) deliveryVendorSearch.addEventListener('input', () => filterTable('deliveryVendorTable', deliveryVendorSearch.value));
 
+  attachCoverageHistoryLeadsHandlers();
   drawCharts();
 }
 
@@ -2286,6 +2697,9 @@ function drawCharts(){
       }
     }
   }
+
+  if(currentPanel === 'coverageHistory') drawCoverageHistoryCharts(gridColor);
+  if(currentPanel === 'leads') drawLeadsCharts(gridColor, textColor);
 
   if(currentPanel === 'orderShare' && !drill.orderShare.city){
     const os = DATA.orderShare;

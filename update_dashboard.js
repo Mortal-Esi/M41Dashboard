@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { buildCoverageHistory, buildLeadsModule, readDailyJiraFile } = require('./history_modules');
 
 // ============================================================
 // CONFIG — edit these lines
@@ -36,6 +37,8 @@ try { LOCAL_CONFIG = require('./config.local.js'); } catch (e) { /* no config.lo
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID || 'PASTE_YOUR_SPREADSHEET_ID_HERE'; // main data sheet (MainData/MotherVendors/TC Eng/BI)
 const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
 const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
+const COVERAGE_HISTORY_SPREADSHEET_ID = process.env.COVERAGE_HISTORY_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_HISTORY_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_HISTORY_SPREADSHEET_ID_HERE'; // per-day tabs of area coverage snapshots
+const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>), Overview, Done_Packs
 
 const SHEET_NAMES = {
   mainData: 'MainData',
@@ -395,6 +398,66 @@ async function main() {
     }
   } catch (err) {
     console.log(`  Skipped — could not read the Delivery sheet (${err.message}). Share it with the service account as Viewer and set DELIVERY_SPREADSHEET_ID in config.local.js.`);
+  }
+
+  console.log('Fetching Coverage history (daily snapshots)…');
+  // Rolling window, same reasoning as Delivery: one new tab per day forever.
+  const COVERAGE_HISTORY_DAYS_KEPT = 60;
+  let coverageHistoryOutput = null;
+  try {
+    if (COVERAGE_HISTORY_SPREADSHEET_ID === 'PASTE_YOUR_COVERAGE_HISTORY_SPREADSHEET_ID_HERE') {
+      console.log('  Skipped — COVERAGE_HISTORY_SPREADSHEET_ID not configured yet (see config.local.js.example).');
+    } else {
+      const titles = await listSheetTitles(sheets, COVERAGE_HISTORY_SPREADSHEET_ID);
+      const dateTabs = titles.filter((t) => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort().slice(-COVERAGE_HISTORY_DAYS_KEPT);
+      const rowsList = await Promise.all(dateTabs.map((d) => fetchSheetAsObjects(sheets, COVERAGE_HISTORY_SPREADSHEET_ID, d)));
+      const rowsByDate = {};
+      dateTabs.forEach((d, i) => { rowsByDate[d] = rowsList[i]; });
+      coverageHistoryOutput = buildCoverageHistory(rowsByDate);
+      console.log(coverageHistoryOutput
+        ? `  Coverage history: ${coverageHistoryOutput.dates.length} days (${coverageHistoryOutput.dates[0]} → ${coverageHistoryOutput.dates[coverageHistoryOutput.dates.length - 1]})`
+        : '  Skipped — no non-empty date tabs (YYYY-MM-DD) found.');
+    }
+  } catch (err) {
+    console.log(`  Skipped — could not read the Coverage history sheet (${err.message}). Share it with the service account as Viewer and set COVERAGE_HISTORY_SPREADSHEET_ID in config.local.js.`);
+  }
+
+  console.log('Fetching Leads (Lead Pool, Overview, Done_Packs) + local Daily Jira file…');
+  let leadsOutput = null;
+  try {
+    if (LEADS_SPREADSHEET_ID === 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE') {
+      console.log('  Skipped — LEADS_SPREADSHEET_ID not configured yet (see config.local.js.example).');
+    } else {
+      const titles = await listSheetTitles(sheets, LEADS_SPREADSHEET_ID);
+      const poolTabs = titles.filter((t) => /^lead pool\s*\(.+\)$/i.test(t.trim()));
+      const [poolRows, overviewRows, donePacksRows] = await Promise.all([
+        Promise.all(poolTabs.map((t) => fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, t))),
+        titles.includes('Overview') ? fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, 'Overview') : [],
+        titles.includes('Done_Packs') ? fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, 'Done_Packs') : [],
+      ]);
+      let daily = null;
+      try {
+        daily = readDailyJiraFile(__dirname);
+        console.log(daily
+          ? `  Daily Jira file: ${daily.file} (${daily.rows.length} issues, saved ${daily.modifiedAt.slice(0, 16).replace('T', ' ')})`
+          : '  Daily Jira file: not found — put the Jira export (Daily*.xlsx) next to update_dashboard.js. Leads still built, without Jira status.');
+      } catch (err) {
+        console.log(`  Daily Jira file could not be read (${err.message}) — leads built without Jira status.`);
+      }
+      leadsOutput = buildLeadsModule({
+        leadPools: poolTabs.map((t, i) => ({ title: t, rows: poolRows[i] })),
+        overviewRows,
+        donePacksRows,
+        daily,
+      });
+      if (leadsOutput) {
+        for (const k of leadsOutput.months) console.log(`  Leads ${k}: ${leadsOutput.byMonth[k].vendors.length} vendors`);
+      } else {
+        console.log('  Skipped — no "Lead Pool (<Month>)" tab found.');
+      }
+    }
+  } catch (err) {
+    console.log(`  Skipped — could not read the Leads sheet (${err.message}). Share it with the service account as Viewer and set LEADS_SPREADSHEET_ID in config.local.js.`);
   }
 
   // ---- FILTER RULE: active (Activity==1 AND Deleted==0), OR PO>0, OR the pack has impressions ----
@@ -1282,6 +1345,8 @@ async function main() {
     impression: impressionModule,
     cpoBudget: cpoBudgetModule,
     delivery: deliveryOutput,
+    coverageHistory: coverageHistoryOutput,
+    leads: leadsOutput,
   };
 
   // Compact (no pretty-print indentation) — this file gets encrypted as-is

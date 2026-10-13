@@ -13,3 +13,12 @@ password.local.js
 # file never has local-only edits that conflict with git (see
 # config.local.js.example for the template).
 config.local.js
+
+# The daily Jira export (Daily*.xlsx) is read locally by update_dashboard.js
+# and holds raw issue data and comments — never commit it.
+Daily*.xlsx
+Daily*.xls
+Daily*.csv
+daily*.xlsx
+daily*.xls
+daily*.csv
