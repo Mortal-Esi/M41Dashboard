@@ -1643,6 +1643,56 @@ const CPO_SEGMENT_COLORS = { Kitchen:'#B389F2', TopCritical:'#FF5A36', Critical:
 // also works on data files exported before this metric existed.
 function subsidyCpo(m){ return m.m4oOrders ? m.subsidyBudget / m.m4oOrders : null; }
 
+// The CPO Budget tab reports Non-Kitchen vendors only: Kitchen vendors are
+// dropped from every numerator AND every denominator (budget shares, order
+// shares, CPOs). Rebuilt here from the per-vendor rows, so the Overview and
+// Kitchen tabs keep using the all-vendor figures from update_dashboard.js.
+let cpoNkCache = null, cpoNkCacheFor = null;
+function cpoNonKitchen(){
+  const src = DATA.cpoBudget;
+  if(!src) return null;
+  if(cpoNkCacheFor === src) return cpoNkCache;
+  const vendorsOf = (areas) => Object.values(areas).flatMap(a => a.vendors.filter(v => !v.kitchen));
+  const all = Object.values(src.byCity).flatMap(c => vendorsOf(c.areas));
+  const sum = (rows, k) => rows.reduce((s,r) => s + (r[k]||0), 0);
+  const pctOf = (n, d) => d ? Math.round(n/d*1000)/10 : 0;
+  function metrics(rows, ref){
+    const subsidyBudget = sum(rows,'subsidyBudget'), freeDeliveryBudget = sum(rows,'freeDeliveryBudget');
+    const totalBudget = sum(rows,'totalBudget'), m4oOrders = sum(rows,'m4oOrders'), totalSold = sum(rows,'totalSold');
+    ref = ref || { totalBudget, m4oOrders };
+    return {
+      vendorCount: rows.length, subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
+      subsidyBudget_pct: pctOf(subsidyBudget, ref.totalBudget),
+      freeDeliveryBudget_pct: pctOf(freeDeliveryBudget, ref.totalBudget),
+      totalBudget_pct: pctOf(totalBudget, ref.totalBudget),
+      m4oOrders_pct: pctOf(m4oOrders, ref.m4oOrders),
+      cpo: m4oOrders ? totalBudget / m4oOrders : null,
+      freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
+    };
+  }
+  const total = metrics(all);
+  const ref = { totalBudget: total.totalBudget, m4oOrders: total.m4oOrders };
+  const segOf = (vc) => vc === 'TopCritical' ? 'TopCritical' : vc === 'Critical' ? 'Critical' : 'Other';
+  const bySegment = {};
+  for(const key of ['TopCritical','Critical','Other']){
+    const rows = all.filter(v => segOf(v.vendorClass) === key);
+    if(rows.length) bySegment[key] = metrics(rows, ref);
+  }
+  const byCity = {};
+  for(const [city, c] of Object.entries(src.byCity)){
+    const areas = {};
+    for(const [area, a] of Object.entries(c.areas)){
+      const vendors = a.vendors.filter(v => !v.kitchen);
+      if(vendors.length) areas[area] = { ...metrics(vendors, ref), vendors };
+    }
+    const cityVendors = vendorsOf(c.areas);
+    if(cityVendors.length) byCity[city] = { ...metrics(cityVendors, ref), areas };
+  }
+  cpoNkCache = { overall:{ all: total, nonKitchen:{ total, bySegment } }, byCity };
+  cpoNkCacheFor = src;
+  return cpoNkCache;
+}
+
 function cpoRow(label, m){
   return `<tr>
     <td>${escapeHtml(label)}</td>
@@ -1659,7 +1709,7 @@ function cpoRow(label, m){
 }
 
 function renderCpoBudget(){
-  const cpo = DATA.cpoBudget;
+  const cpo = cpoNonKitchen();
   if(!cpo){
     return `<div class="empty-state">No CPO Budget data available. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
   }
@@ -1667,12 +1717,11 @@ function renderCpoBudget(){
 
   if(!d.city){
     const nk = cpo.overall.nonKitchen;
-    const kAll = cpo.overall.kitchen.total;
     const seg = nk.bySegment;
     const cities = Object.entries(cpo.byCity).sort((a,b)=>b[1].totalBudget-a[1].totalBudget);
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">Month-to-date (Gregorian calendar month, updated daily) — same MTD convention as the rest of the dashboard. Every budget figure below shows its share of the total budget next to it.</div>
+      <div class="section-note">Non-Kitchen vendors only — Kitchen vendors are excluded from every figure on this tab, numerators and denominators alike (see the Kitchen tab for them). Month-to-date (Gregorian calendar month, updated daily). Every budget figure shows its share of the Non-Kitchen total budget next to it.</div>
       <div class="stat-row">
         <div class="stat-card accent"><div class="label">Total Budget</div><div class="value">${tomanCompact(cpo.overall.all.totalBudget)}</div></div>
         <div class="stat-card"><div class="label">Subsidy Budget</div><div class="value small">${tomanCompact(cpo.overall.all.subsidyBudget)}<span class="pct-tag">${pct1(cpo.overall.all.subsidyBudget_pct)}</span></div></div>
@@ -1691,7 +1740,7 @@ function renderCpoBudget(){
         <div class="chart-box"><h3>M4O Order Share by City</h3><canvas id="cpoCityOrdersChart"></canvas></div>
       </div>
       <div class="section-title">By Segment</div>
-      <div class="section-note">Kitchen vendors have a structurally different cost model, so they're kept as their own line rather than mixed into the Non-Kitchen segments. Non-Kitchen collapses to three buckets: Top Critical, Critical, and Other (Important + Ordinary).</div>
+      <div class="section-note">Three buckets: Top Critical, Critical, and Other (Important + Ordinary).</div>
       <div class="table-wrap" style="margin-bottom:22px">
         <table>
           <thead><tr><th>Segment</th><th>Vendors</th><th>Subsidy Budget</th><th>Free Delivery Budget</th><th>Total Budget</th><th>M4O Orders</th><th>Total Sold</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy CPO</th></tr></thead>
@@ -1699,8 +1748,7 @@ function renderCpoBudget(){
             ${cpoRow('Top Critical', seg.TopCritical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
             ${cpoRow('Critical', seg.Critical || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
             ${cpoRow('Other (Important + Ordinary)', seg.Other || {vendorCount:0,subsidyBudget:0,freeDeliveryBudget:0,totalBudget:0,m4oOrders:0,totalSold:0,subsidyBudget_pct:0,freeDeliveryBudget_pct:0,totalBudget_pct:0,m4oOrders_pct:0,cpo:null,freeDeliveryCpo:null})}
-            ${cpoRow('Non-Kitchen (all)', nk.total)}
-            ${cpoRow('Kitchen', kAll)}
+            ${cpoRow('Total (Non-Kitchen)', nk.total)}
           </tbody>
         </table>
       </div>
@@ -1742,14 +1790,13 @@ function renderCpoBudget(){
     <input class="search-box" id="cpoVendorSearch" placeholder="Filter vendors by name…">
     <div class="table-wrap">
       <table id="cpoVendorTable">
-        <thead><tr><th>Vendor</th><th>Vendor Class</th><th>Tier</th><th>New Class</th><th>Kitchen</th><th>M4O Orders</th><th>Total Sold</th><th>Total Budget</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy CPO</th></tr></thead>
+        <thead><tr><th>Vendor</th><th>Vendor Class</th><th>Tier</th><th>New Class</th><th>M4O Orders</th><th>Total Sold</th><th>Total Budget</th><th>CPO</th><th>Free Delivery CPO</th><th>Subsidy CPO</th></tr></thead>
         <tbody>
           ${vendors.map(v => `<tr data-name="${escapeHtml(v.name.toLowerCase())}">
             <td>${escapeHtml(v.name)}</td>
             <td><span class="badge vc-${escapeAttr((v.vendorClass||'Unknown').replace(' ',''))}">${escapeHtml(v.vendorClass)}</span></td>
             <td><span class="badge seg-${escapeAttr(v.vendorTier)}">${escapeHtml(v.vendorTier)}</span></td>
             <td>${escapeHtml(v.newVendorClass)}</td>
-            <td>${v.kitchen ? '<span class="badge kit">Kitchen</span>' : '<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${fmt(v.m4oOrders)}</td>
             <td style="font-family:var(--mono)">${fmt(v.totalSold)}</td>
             <td style="font-family:var(--mono); font-weight:600">${tomanCompact(v.totalBudget)}</td>
@@ -2633,15 +2680,15 @@ function drawCharts(){
   }
 
   if(currentPanel === 'cpoBudget' && !drill.cpoBudget.city){
-    const cpo = DATA.cpoBudget;
+    const cpo = cpoNonKitchen();
     if(cpo){
       const nk = cpo.overall.nonKitchen;
       const seg = nk.bySegment;
       const ctx1 = document.getElementById('cpoSegmentChart');
       if(ctx1){
-        const labels = ['Top Critical','Critical','Other','Kitchen'];
-        const values = [seg.TopCritical, seg.Critical, seg.Other, cpo.overall.kitchen.total].map(m => m ? m.totalBudget : 0);
-        const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other, CPO_SEGMENT_COLORS.Kitchen];
+        const labels = ['Top Critical','Critical','Other'];
+        const values = [seg.TopCritical, seg.Critical, seg.Other].map(m => m ? m.totalBudget : 0);
+        const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other];
         const segTotal = values.reduce((a,b)=>a+b,0);
         charts.cpoSegmentChart = new Chart(ctx1, {
           type:'doughnut',
@@ -2668,9 +2715,9 @@ function drawCharts(){
       }
       const ctx3 = document.getElementById('cpoSegmentOrdersChart');
       if(ctx3){
-        const labels = ['Top Critical','Critical','Other','Kitchen'];
-        const values = [seg.TopCritical, seg.Critical, seg.Other, cpo.overall.kitchen.total].map(m => m ? m.m4oOrders : 0);
-        const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other, CPO_SEGMENT_COLORS.Kitchen];
+        const labels = ['Top Critical','Critical','Other'];
+        const values = [seg.TopCritical, seg.Critical, seg.Other].map(m => m ? m.m4oOrders : 0);
+        const colors = [CPO_SEGMENT_COLORS.TopCritical, CPO_SEGMENT_COLORS.Critical, CPO_SEGMENT_COLORS.Other];
         const ordersTotal = values.reduce((a,b)=>a+b,0);
         charts.cpoSegmentOrdersChart = new Chart(ctx3, {
           type:'doughnut',
