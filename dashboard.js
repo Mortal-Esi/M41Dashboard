@@ -415,7 +415,7 @@ function renderOverview(){
   const d = drill.overview;
   const filtered = superTypeFilter !== 'all';
   const win = orderWindow;
-  const vcAll = DATA.vendorCoverage, pdAll = DATA.packDistribution, rtAll = DATA.rating, osAll = DATA.orderShare, cpoAll = DATA.cpoBudget;
+  const vcAll = DATA.vendorCoverage, pdAll = DATA.packDistribution, rtAll = DATA.rating, osAll = DATA.orderShare, cpoAll = cpoNonKitchen(); // budget/CPO here are Non-Kitchen only, same as the CPO Budget tab
 
   function vendorPackRateForCity(city){
     const vcCity = vcAll[city];
@@ -469,7 +469,7 @@ function renderOverview(){
 
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, Top Critical engagement, budget and coverage together, per city and Marketing Area.${!filtered ? '' : ' Budget, CPO, Coverage and Top Critical figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
+      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, Top Critical engagement, budget and coverage together, per city and Marketing Area. Budget and CPO exclude Kitchen vendors (numerator and denominator), matching the CPO Budget tab.${!filtered ? '' : ' Budget, CPO, Coverage and Top Critical figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
       <div class="flex-between">
         <div class="section-title" style="margin:0">Overview</div>
         <div class="toggle-group">
@@ -486,12 +486,12 @@ function renderOverview(){
         ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${overallAllCitiesShare !== undefined ? `<div class="stat-card"><div class="label">Order Share (All Cities)</div><div class="value small">${overallAllCitiesShare!==null?shareToPct(overallAllCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${tc ? `<div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value small">${shareToPct(tc.rate)}</div><div class="sub">${fmt(tc.numerator)} / ${fmt(tc.denominator)} ordered M4O (30 days)</div></div>` : ''}
-        ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
-        ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">Overall CPO</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
+        ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget (Non-Kitchen)</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
+        ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">CPO (Non-Kitchen)</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>TC Engaged</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>TC Engaged</th><th>Total Budget (Non-Kitchen)</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
           <tbody>
             ${rows.map(r => `<tr class="clickable" data-action="ov-city" data-city="${escapeAttr(r.city)}">
               <td>${escapeHtml(r.city)}</td>
@@ -567,7 +567,7 @@ function renderOverview(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>Total Budget</th><th>CPO</th><th>Coverage</th></tr></thead>
+        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>Total Budget (Non-Kitchen)</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
         <tbody>
           ${rows.map(r => `<tr>
             <td>${escapeHtml(r.area)}</td>
