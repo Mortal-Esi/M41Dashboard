@@ -3,7 +3,7 @@
    ============================================================ */
 let DATA = null;
 let currentPanel = 'overview';
-let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null}, coverageHistory:{city:null,area:null}, leads:{group:null,groupBy:null} };
+let drill = { overview:{city:null,area:null}, vendorCoverage:{city:null,area:null,vendorId:null}, packDistribution:{city:null,area:null}, rating:{city:null}, coverageModel:{city:null}, kitchen:{city:null,area:null}, orderShare:{city:null}, impression:{city:null,area:null}, cpoBudget:{city:null,area:null}, delivery:{city:null,area:null,vendorId:null}, coverageHistory:{city:null,area:null} };
 let impressionConversionSort = 'totalImpression'; // 'totalImpression' | 'conversion'
 let orderWindow = 'mtd';
 let deliveryDate = null; // set to the latest available date on first render of the Delivery tab
@@ -2180,52 +2180,22 @@ function drawCoverageHistoryCharts(gridColor){
 }
 
 /* ============================================================
-   MODULE: LEAD TRACKING (monthly lead pool → Jira → pack → order)
+   MODULE: LEAD TRACKING (how many of the month's leads got Done in Jira)
    ============================================================ */
 let leadsMonth = null;
-let leadsGroupBy = 'city';
-let leadsStage = 'all';
-const LEAD_GROUPS = [
-  ['city','City'], ['assignee','Assignee'], ['tier','Tier'], ['cls','Vendor Class'],
-  ['leadType','Lead Type'], ['pro','Pro'], ['jiraStatus','Jira Status'],
-];
-const LEAD_STAGES = ['No Jira issue','In Jira','Jira Done, no pack','Pack inactive','Active, no order','Ordered'];
-const LEAD_STAGE_COLORS = { 'No Jira issue':'#4A5266', 'In Jira':'#F2B84B', 'Jira Done, no pack':'#B389F2', 'Pack inactive':'#E45A5A', 'Active, no order':'#4C8CFF', 'Ordered':'#3DDC97' };
 
-function leadStage(v){
-  if(v.orders > 0) return 'Ordered';
-  if(v.activePacks > 0) return 'Active, no order';
-  if(v.packs > 0) return 'Pack inactive';
-  if(v.jira && v.jira.status === 'Done') return 'Jira Done, no pack';
-  if(v.jira) return 'In Jira';
-  return 'No Jira issue';
-}
-function leadGroupKey(v, by){
-  if(by === 'pro') return v.pro ? 'Pro' : 'Non-Pro';
-  if(by === 'jiraStatus') return v.jira ? v.jira.status : '(no Jira issue)';
-  if(by === 'leadType') return v.leadType || '(unknown)';
-  return v[by] || '—';
-}
-function leadFunnel(vs){
-  const n = (f) => vs.filter(f).length;
-  return {
-    leads: vs.length,
-    jira: n(v => v.jira),
-    jiraDone: n(v => v.jira && v.jira.status === 'Done'),
-    packs: n(v => v.packs > 0),
-    packsInMonth: n(v => v.packsInMonth > 0),
-    active: n(v => v.activePacks > 0),
-    ordered: n(v => v.orders > 0),
-    activePackCount: vs.reduce((s,v) => s + v.activePacks, 0),
-    orders: vs.reduce((s,v) => s + v.orders, 0),
-  };
-}
 function leadsMonthData(){
   const L = DATA.leads;
   if(!leadsMonth || !L.byMonth[leadsMonth]) leadsMonth = L.months[L.months.length-1];
   return L.byMonth[leadsMonth];
 }
-const ofPct = (n, d) => d ? ` <span class="dim">(${pct1(n/d*100)})</span>` : '';
+function doneRateCell(done, total){
+  const p = total ? done/total*100 : 0;
+  return `<div style="display:flex; align-items:center; gap:10px; min-width:160px">
+    <div style="flex:1; height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden"><div style="height:100%; border-radius:4px; width:${Math.min(p,100)}%; background:var(--seg-a)"></div></div>
+    <b style="font-family:var(--mono); min-width:48px; text-align:right">${pct1(p)}</b>
+  </div>`;
+}
 
 function renderLeads(){
   const L = DATA.leads;
@@ -2233,150 +2203,64 @@ function renderLeads(){
     return `<div class="empty-state">No Lead Tracking data available. Set LEADS_SPREADSHEET_ID in config.local.js, share the sheet with the service account, then re-run <code>node update_dashboard.js</code>.</div>`;
   }
   const M = leadsMonthData();
-  const d = drill.leads;
-  const all = M.vendors;
-  const scoped = d.group === null ? all : all.filter(v => leadGroupKey(v, d.groupBy) === d.group);
-  const f = leadFunnel(scoped);
-  const targets = M.targets;
-  let tgt = null;
-  if(targets){
-    if(d.group === null) tgt = targets.__total__ || null;
-    else if(d.groupBy === 'city') tgt = targets[d.group] || null;
+  const monthName = M.label.split(' ')[0];
+  const vs = M.vendors;
+
+  if(!L.jiraSource){
+    return `
+      ${breadcrumb([M.label])}
+      <div class="empty-state" style="text-align:left">
+        <b>The Daily Jira file wasn't used when this data was built, so Done can't be counted.</b><br><br>
+        Reason: <code>${escapeHtml(L.jiraError || 'this data was built by an older version of update_dashboard.js — run it again')}</code><br><br>
+        Put the Jira export in the same folder as <code>update_dashboard.js</code> and run <code>refresh-dashboard.bat</code> again.
+        ${fmt(vs.length)} leads were found in the lead pool.
+      </div>`;
   }
+
+  const done = vs.filter(v => v.done).length;
+  const doneBefore = vs.filter(v => v.doneBefore).length;
+  const notInJira = vs.filter(v => !v.inJira).length;
+  const byCity = new Map();
+  for(const v of vs){
+    if(!byCity.has(v.city)) byCity.set(v.city, { leads:0, done:0 });
+    const c = byCity.get(v.city); c.leads++; if(v.done) c.done++;
+  }
+  const cities = [...byCity.entries()].sort((a,b) => b[1].leads - a[1].leads);
   const js = L.jiraSource;
-  const jiraNote = js
-    ? `Jira status from <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC, ${fmt(js.issues)} issues; latest issue per vendor).`
-    : `<span style="color:var(--warn)">No Daily Jira file was found when the data was built — put the Jira export (Daily*.xlsx) next to update_dashboard.js.</span>`;
 
-  const head = `<div class="flex-between">
-    <div class="section-note" style="margin:0">Where each lead in the month's lead pool ended up. Pack and order figures come from Done_Packs (active = Activity 1 and not deleted; orders = M4O orders MTD). ${jiraNote}</div>
-    ${L.months.length > 1 ? `<select id="leadsMonthSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
-      ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
-    </select>` : ''}
-  </div>`;
-
-  const cards = `<div class="stat-row">
-    <div class="stat-card"><div class="label">Leads</div><div class="value small">${fmt(f.leads)}</div>${tgt ? `<div class="sub">Overview lead pool: ${fmt(tgt.leadPool)}</div>` : ''}</div>
-    <div class="stat-card warn"><div class="label">Jira Issue</div><div class="value small">${fmt(f.jira)}</div><div class="sub">${f.leads?pct1(f.jira/f.leads*100):'—'} of leads · ${fmt(f.jiraDone)} Done</div></div>
-    <div class="stat-card purple"><div class="label">Pack Built</div><div class="value small">${fmt(f.packs)}</div><div class="sub">${fmt(f.packsInMonth)} built in ${escapeHtml(M.label.split(' ')[0])}</div></div>
-    <div class="stat-card seg-b"><div class="label">Active Pack (vendors)</div><div class="value small">${fmt(f.active)}</div><div class="sub">${tgt ? `Target ${fmt(tgt.vendorTarget)} · ${tgt.vendorTarget?pct1(f.active/tgt.vendorTarget*100):'—'} achieved` : `${f.leads?pct1(f.active/f.leads*100):'—'} of leads`}</div></div>
-    <div class="stat-card"><div class="label">Active Packs</div><div class="value small">${fmt(f.activePackCount)}</div>${tgt ? `<div class="sub">Target ${fmt(tgt.packTarget)} · ${tgt.packTarget?pct1(f.activePackCount/tgt.packTarget*100):'—'} achieved</div>` : ''}</div>
-    <div class="stat-card seg-a"><div class="label">Ordered M4O</div><div class="value small">${fmt(f.ordered)}</div><div class="sub">${fmt(f.orders)} orders MTD</div></div>
-  </div>`;
-
-  const groups = new Map();
-  for(const v of all){
-    const k = leadGroupKey(v, leadsGroupBy);
-    if(!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(v);
-  }
-  const showTargets = leadsGroupBy === 'city' && targets;
-  const groupRows = [...groups.entries()].map(([k,vs]) => ({ k, f:leadFunnel(vs), t: showTargets ? targets[k] : null }))
-    .sort((a,b)=> b.f.leads - a.f.leads);
-  const groupTable = `
-    <div class="flex-between">
-      <div class="section-title" style="margin:0">Breakdown</div>
-      <div class="toggle-group">
-        ${LEAD_GROUPS.map(([k,l]) => `<div class="toggle-btn ${leadsGroupBy===k?'active':''}" data-leadgroup="${k}">${l}</div>`).join('')}
-      </div>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>${escapeHtml(LEAD_GROUPS.find(g=>g[0]===leadsGroupBy)[1])}</th><th>Leads</th><th>Jira Issue</th><th>Jira Done</th><th>Pack Built</th><th>Active Pack</th><th>Ordered</th><th>Orders</th>${showTargets?'<th>Vendor Target</th><th>Achieved</th><th>Active Packs / Target</th>':''}</tr></thead>
-      <tbody>
-        ${groupRows.map(r => `<tr class="clickable ${d.group===r.k && d.groupBy===leadsGroupBy?'selected':''}" data-action="ld-group" data-group="${escapeAttr(r.k)}">
-          <td>${escapeHtml(r.k)}</td>
-          <td style="font-family:var(--mono)">${fmt(r.f.leads)}</td>
-          <td>${fmt(r.f.jira)}${ofPct(r.f.jira, r.f.leads)}</td>
-          <td>${fmt(r.f.jiraDone)}</td>
-          <td>${fmt(r.f.packs)}</td>
-          <td>${fmt(r.f.active)}${ofPct(r.f.active, r.f.leads)}</td>
-          <td>${fmt(r.f.ordered)}${ofPct(r.f.ordered, r.f.leads)}</td>
-          <td style="font-family:var(--mono)">${fmt(r.f.orders)}</td>
-          ${showTargets ? (r.t ? `<td>${fmt(r.t.vendorTarget)}</td><td>${r.t.vendorTarget?pct1(r.f.active/r.t.vendorTarget*100):'—'}</td><td>${fmt(r.f.activePackCount)} / ${fmt(r.t.packTarget)}</td>` : '<td class="dim">—</td><td class="dim">—</td><td class="dim">—</td>') : ''}
-        </tr>`).join('')}
-      </tbody>
-    </table></div>`;
-
-  const stageCounts = LEAD_STAGES.map(s => [s, scoped.filter(v => leadStage(v) === s).length]);
-  const listed = (leadsStage === 'all' ? scoped : scoped.filter(v => leadStage(v) === leadsStage))
-    .slice().sort((a,b) => LEAD_STAGES.indexOf(leadStage(b)) - LEAD_STAGES.indexOf(leadStage(a)) || b.orders - a.orders || a.city.localeCompare(b.city));
-  const vendorTable = `
-    <div class="flex-between">
-      <div class="section-title" style="margin:0">Vendors (${fmt(listed.length)})</div>
-      <select id="leadsStageSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
-        <option value="all" ${leadsStage==='all'?'selected':''}>All stages (${fmt(scoped.length)})</option>
-        ${stageCounts.map(([s,n]) => `<option value="${escapeAttr(s)}" ${leadsStage===s?'selected':''}>${escapeHtml(s)} (${fmt(n)})</option>`).join('')}
-      </select>
-    </div>
-    <input class="search-box" id="leadsVendorSearch" placeholder="Filter by vendor, ID, area, assignee or Jira key…">
-    <div class="table-wrap"><table id="leadsVendorTable">
-      <thead><tr><th>Vendor</th><th>City</th><th>Area</th><th>Tier</th><th>Class</th><th>Assignee</th><th>Lead Type</th><th>Jira</th><th>Stage</th><th>Packs (live / this month)</th><th>Active</th><th>Orders</th></tr></thead>
-      <tbody>
-        ${listed.map(v => { const st = leadStage(v); return `<tr data-name="${escapeAttr([v.name, v.id, v.area, v.assignee, v.jira && v.jira.key].join(' ').toLowerCase())}">
-          <td>${escapeHtml(v.name)} <span class="dim">${escapeHtml(v.id)}</span>${v.pro?' <span class="badge sub-d">Pro</span>':''}</td>
-          <td>${escapeHtml(v.city)}</td>
-          <td>${escapeHtml(v.area)}</td>
-          <td><span class="badge seg-${escapeAttr(v.tier==='—'?'Unknown':v.tier)}">${escapeHtml(v.tier)}</span></td>
-          <td><span class="badge vc-${escapeAttr(v.cls)}">${escapeHtml(v.cls)}</span></td>
-          <td>${escapeHtml(v.assignee)}</td>
-          <td>${escapeHtml(v.leadType || '—')}</td>
-          <td>${v.jira ? `${escapeHtml(v.jira.status)} <span class="dim">${escapeHtml(v.jira.key||'')}${v.jira.issues>1?` · ${v.jira.issues} issues`:''}</span>` : '<span class="dim">—</span>'}</td>
-          <td><span class="badge" style="background:${LEAD_STAGE_COLORS[st]}26; color:${LEAD_STAGE_COLORS[st]}">${escapeHtml(st)}</span></td>
-          <td style="font-family:var(--mono)">${fmt(v.packs)} / ${fmt(v.packsInMonth)}</td>
-          <td style="font-family:var(--mono)">${fmt(v.activePacks)}</td>
-          <td style="font-family:var(--mono)">${fmt(v.orders)}</td>
-        </tr>`; }).join('')}
-      </tbody>
-    </table></div>`;
-
-  const crumbs = d.group === null
-    ? breadcrumb([M.label])
-    : breadcrumb([M.label, `${LEAD_GROUPS.find(g=>g[0]===d.groupBy)[1]}: ${d.group}`], ['ld-group-null']);
   return `
-    ${crumbs}
-    ${head}
-    ${cards}
-    <div class="chart-row">
-      <div class="chart-box"><h3>Funnel</h3><canvas id="leadsFunnelChart"></canvas></div>
-      <div class="chart-box"><h3>Where Leads Are Now</h3><canvas id="leadsStageChart"></canvas></div>
+    ${breadcrumb([M.label])}
+    <div class="flex-between">
+      <div class="section-note" style="margin:0">Leads in the <b>Lead Pool (${escapeHtml(monthName)})</b> sheet tab that have a Jira issue with status <b>Done</b>, created in ${escapeHtml(monthName)} or later. Jira file: <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC).</div>
+      ${L.months.length > 1 ? `<select id="leadsMonthSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
+        ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
+      </select>` : ''}
     </div>
-    ${groupTable}
-    ${vendorTable}`;
-}
-
-function drawLeadsCharts(gridColor, textColor){
-  if(!DATA.leads || !DATA.leads.months || !DATA.leads.months.length) return;
-  const M = leadsMonthData();
-  const d = drill.leads;
-  const scoped = d.group === null ? M.vendors : M.vendors.filter(v => leadGroupKey(v, d.groupBy) === d.group);
-  const f = leadFunnel(scoped);
-  const ctx1 = document.getElementById('leadsFunnelChart');
-  if(ctx1){
-    const labels = ['Leads','Jira issue','Jira Done','Pack built','Active pack','Ordered M4O'];
-    const vals = [f.leads, f.jira, f.jiraDone, f.packs, f.active, f.ordered];
-    charts.leadsFunnelChart = new Chart(ctx1, {
-      type:'bar',
-      data:{ labels, datasets:[{ data: vals, backgroundColor:['#8B96A8','#F2B84B','#B389F2','#E45A5A','#4C8CFF','#3DDC97'], borderRadius:4 }]},
-      options:{ indexAxis:'y', plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:(c)=>`${fmt(c.parsed.x)} (${f.leads?pct1(c.parsed.x/f.leads*100):'—'} of leads)` } } },
-        scales:{ x:{grid:{color:gridColor}}, y:{grid:{display:false}} } }
-    });
-  }
-  const ctx2 = document.getElementById('leadsStageChart');
-  if(ctx2){
-    const counts = LEAD_STAGES.map(s => scoped.filter(v => leadStage(v) === s).length);
-    const total = counts.reduce((a,b)=>a+b,0);
-    charts.leadsStageChart = new Chart(ctx2, {
-      type:'doughnut',
-      data:{ labels: LEAD_STAGES, datasets:[{ data: counts, backgroundColor: LEAD_STAGES.map(s => LEAD_STAGE_COLORS[s]), borderWidth:0 }]},
-      options:{ cutout:'60%', plugins:{
-        legend:{ position:'right', labels:{ boxWidth:10, color:textColor, generateLabels:(chart) => LEAD_STAGES.map((s,i) => ({
-          text:`${s}: ${fmt(counts[i])}`, fillStyle:LEAD_STAGE_COLORS[s], strokeStyle:LEAD_STAGE_COLORS[s], fontColor:textColor, index:i,
-          hidden: !chart.getDataVisibility(i),
-        })) } },
-        tooltip:{ callbacks:{ label:(c)=>`${c.label}: ${fmt(c.parsed)} (${total?pct1(c.parsed/total*100):'—'})` } },
-      } }
-    });
-  }
+    <div class="stat-row">
+      <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
+      <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div></div>
+      <div class="stat-card accent"><div class="label">Done %</div><div class="value">${vs.length ? pct1(done/vs.length*100) : '—'}</div></div>
+    </div>
+    ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done issue from before ${escapeHtml(monthName)} only — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>City</th><th>Leads</th><th>Done</th><th>Done %</th></tr></thead>
+        <tbody>
+          ${cities.map(([city,c]) => `<tr>
+            <td>${escapeHtml(city)}</td>
+            <td style="font-family:var(--mono)">${fmt(c.leads)}</td>
+            <td style="font-family:var(--mono)">${fmt(c.done)}</td>
+            <td>${doneRateCell(c.done, c.leads)}</td>
+          </tr>`).join('')}
+          <tr style="font-weight:600">
+            <td>Total</td>
+            <td style="font-family:var(--mono)">${fmt(vs.length)}</td>
+            <td style="font-family:var(--mono)">${fmt(done)}</td>
+            <td>${doneRateCell(done, vs.length)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function attachCoverageHistoryLeadsHandlers(){
@@ -2392,22 +2276,8 @@ function attachCoverageHistoryLeadsHandlers(){
   document.querySelectorAll('[data-chrange]').forEach(el => {
     el.addEventListener('click', () => { covHistRange = Number(el.dataset.chrange); render(); });
   });
-  document.querySelectorAll('[data-leadgroup]').forEach(el => {
-    el.addEventListener('click', () => { leadsGroupBy = el.dataset.leadgroup; render(); });
-  });
-  document.querySelectorAll('[data-action="ld-group"]').forEach(el => {
-    el.addEventListener('click', () => {
-      const same = drill.leads.group === el.dataset.group && drill.leads.groupBy === leadsGroupBy;
-      drill.leads = same ? { group:null, groupBy:null } : { group: el.dataset.group, groupBy: leadsGroupBy };
-      render();
-    });
-  });
   const monthSel = document.getElementById('leadsMonthSelect');
-  if(monthSel) monthSel.addEventListener('change', () => { leadsMonth = monthSel.value; drill.leads = { group:null, groupBy:null }; render(); });
-  const stageSel = document.getElementById('leadsStageSelect');
-  if(stageSel) stageSel.addEventListener('change', () => { leadsStage = stageSel.value; render(); });
-  const leadsSearch = document.getElementById('leadsVendorSearch');
-  if(leadsSearch) leadsSearch.addEventListener('input', () => filterTable('leadsVendorTable', leadsSearch.value));
+  if(monthSel) monthSel.addEventListener('change', () => { leadsMonth = monthSel.value; render(); });
 }
 
 /* ============================================================
@@ -2501,7 +2371,6 @@ function attachHandlers(){
       if(module === 'imp'){ if(level==='city') { drill.impression.city=null; drill.impression.area=null; } if(level==='area'){ drill.impression.area=null; } }
       if(module === 'cpo'){ if(level==='city') { drill.cpoBudget.city=null; drill.cpoBudget.area=null; } if(level==='area'){ drill.cpoBudget.area=null; } }
       if(module === 'ch'){ if(level==='city') { drill.coverageHistory.city=null; drill.coverageHistory.area=null; } if(level==='area'){ drill.coverageHistory.area=null; } }
-      if(module === 'ld'){ if(level==='group') { drill.leads = { group:null, groupBy:null }; } }
       if(module === 'dl'){
         if(level==='city') { drill.delivery.city=null; drill.delivery.area=null; drill.delivery.vendorId=null; }
         if(level==='area'){ drill.delivery.area=null; drill.delivery.vendorId=null; }
@@ -2746,7 +2615,6 @@ function drawCharts(){
   }
 
   if(currentPanel === 'coverageHistory') drawCoverageHistoryCharts(gridColor);
-  if(currentPanel === 'leads') drawLeadsCharts(gridColor, textColor);
 
   if(currentPanel === 'orderShare' && !drill.orderShare.city){
     const os = DATA.orderShare;

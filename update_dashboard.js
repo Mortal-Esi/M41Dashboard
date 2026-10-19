@@ -38,7 +38,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID
 const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
 const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
 const COVERAGE_HISTORY_SPREADSHEET_ID = process.env.COVERAGE_HISTORY_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_HISTORY_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_HISTORY_SPREADSHEET_ID_HERE'; // per-day tabs of area coverage snapshots
-const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>), Overview, Done_Packs
+const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>) tabs
 
 const SHEET_NAMES = {
   mainData: 'MainData',
@@ -422,7 +422,7 @@ async function main() {
     console.log(`  Skipped — could not read the Coverage history sheet (${err.message}). Share it with the service account as Viewer and set COVERAGE_HISTORY_SPREADSHEET_ID in config.local.js.`);
   }
 
-  console.log('Fetching Leads (Lead Pool, Overview, Done_Packs) + local Daily Jira file…');
+  console.log('Fetching Leads (Lead Pool tabs) + local Daily Jira file…');
   let leadsOutput = null;
   try {
     if (LEADS_SPREADSHEET_ID === 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE') {
@@ -430,28 +430,20 @@ async function main() {
     } else {
       const titles = await listSheetTitles(sheets, LEADS_SPREADSHEET_ID);
       const poolTabs = titles.filter((t) => /^lead pool\s*\(.+\)$/i.test(t.trim()));
-      const [poolRows, overviewRows, donePacksRows] = await Promise.all([
-        Promise.all(poolTabs.map((t) => fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, t))),
-        titles.includes('Overview') ? fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, 'Overview') : [],
-        titles.includes('Done_Packs') ? fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, 'Done_Packs') : [],
-      ]);
-      let daily = null;
-      try {
-        daily = readDailyJiraFile(__dirname);
-        console.log(daily
-          ? `  Daily Jira file: ${daily.file} (${daily.rows.length} issues, saved ${daily.modifiedAt.slice(0, 16).replace('T', ' ')})`
-          : '  Daily Jira file: not found — put the Jira export (Daily*.xlsx) next to update_dashboard.js. Leads still built, without Jira status.');
-      } catch (err) {
-        console.log(`  Daily Jira file could not be read (${err.message}) — leads built without Jira status.`);
-      }
+      const poolRows = await Promise.all(poolTabs.map((t) => fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, t)));
+      const daily = readDailyJiraFile(__dirname);
+      console.log(daily.rows
+        ? `  Daily Jira file: ${daily.file} (${daily.rows.length} issues, saved ${daily.modifiedAt.slice(0, 16).replace('T', ' ')} UTC)`
+        : `  WARNING — Daily Jira file not used: ${daily.error}`);
       leadsOutput = buildLeadsModule({
         leadPools: poolTabs.map((t, i) => ({ title: t, rows: poolRows[i] })),
-        overviewRows,
-        donePacksRows,
         daily,
       });
       if (leadsOutput) {
-        for (const k of leadsOutput.months) console.log(`  Leads ${k}: ${leadsOutput.byMonth[k].vendors.length} vendors`);
+        for (const k of leadsOutput.months) {
+          const vs = leadsOutput.byMonth[k].vendors;
+          console.log(`  Leads ${k}: ${vs.length} vendors, ${vs.filter((v) => v.done).length} Done`);
+        }
       } else {
         console.log('  Skipped — no "Lead Pool (<Month>)" tab found.');
       }
