@@ -261,11 +261,16 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], 
 
   // MainData only reflects the current state, so it's the same for every month.
   const liveInMainData = new Set();
+  // vendor_m41_Orders_MTD is a vendor-level figure repeated on every pack
+  // row, so it's the max per vendor, never a sum across packs.
+  const ordersMtdByVendor = new Map();
   for (const r of mainRows) {
     const vid = clean(r.VendorID);
     if (!vid) continue;
     const active = toNum(r.Activity) === 1 && toNum(r.Deleted) === 0;
-    if (active || toNum(r.vendor_m41_Orders_MTD) > 0) liveInMainData.add(vid);
+    const orders = toNum(r.vendor_m41_Orders_MTD);
+    if (orders > (ordersMtdByVendor.get(vid) || 0)) ordersMtdByVendor.set(vid, orders);
+    if (active || orders > 0) liveInMainData.add(vid);
   }
 
   const targets = parseVendorTargets(overviewRows);
@@ -293,6 +298,7 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], 
         mainDone: mainDone ? 1 : 0,
         doneKey: jiraDone ? doneIn[0].key : null,
         doneBefore: !jiraDone && !mainDone && done.length ? 1 : 0,
+        ordersMtd: ordersMtdByVendor.get(vid) || 0,
       });
     }
     // The Overview tab has no month in its name, so its targets belong to

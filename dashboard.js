@@ -2263,14 +2263,16 @@ function renderLeads(){
   }
 
   const done = vs.filter(v => v.done).length;
+  const doneOrders = vs.filter(v => v.done).reduce((s,v) => s + (v.ordersMtd || 0), 0);
+  const hasOrders = vs.some(v => v.ordersMtd !== undefined);
   const viaJira = vs.filter(v => v.jiraDone).length;
   const viaMainOnly = vs.filter(v => v.mainDone && !v.jiraDone).length;
   const doneBefore = vs.filter(v => v.doneBefore).length;
   const notInJira = vs.filter(v => !v.inJira).length;
   const byCity = new Map();
   for(const v of vs){
-    if(!byCity.has(v.city)) byCity.set(v.city, { leads:0, done:0 });
-    const c = byCity.get(v.city); c.leads++; if(v.done) c.done++;
+    if(!byCity.has(v.city)) byCity.set(v.city, { leads:0, done:0, orders:0 });
+    const c = byCity.get(v.city); c.leads++; if(v.done){ c.done++; c.orders += v.ordersMtd || 0; }
   }
   const cities = [...byCity.entries()].sort((a,b) => b[1].leads - a[1].leads);
   const js = L.jiraSource;
@@ -2289,6 +2291,7 @@ function renderLeads(){
     <div class="stat-row">
       <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
       <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div><div class="sub">${fmt(viaJira)} via Jira · ${fmt(viaMainOnly)} via MainData only</div></div>
+      ${hasOrders ? `<div class="stat-card purple"><div class="label">M4O Orders MTD (Done vendors)</div><div class="value">${fmt(doneOrders)}</div></div>` : ''}
       <div class="stat-card accent"><div class="label">Conversion (Done / Leads)</div><div class="value">${vs.length ? pct1(done/vs.length*100) : '—'}</div></div>
       ${T ? `<div class="stat-card"><div class="label">Total Vendor Target</div><div class="value">${fmt(totalTarget)}</div></div>
       <div class="stat-card seg-b"><div class="label">Target Achieved (Done / Target)</div><div class="value">${totalTarget ? pct1(done/totalTarget*100) : '—'}</div></div>` : ''}
@@ -2296,13 +2299,14 @@ function renderLeads(){
     ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done-stage Jira issue from before ${escapeHtml(monthName)} only (and nothing live in MainData) — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>City</th><th>Leads</th>${T?'<th>Vendor Target</th>':''}<th>Done</th><th>Conversion</th>${T?'<th>Target Achieved</th>':''}</tr></thead>
+        <thead><tr><th>City</th><th>Leads</th>${T?'<th>Vendor Target</th>':''}<th>Done</th>${hasOrders?'<th>Orders MTD (Done)</th>':''}<th>Conversion</th>${T?'<th>Target Achieved</th>':''}</tr></thead>
         <tbody>
           ${cities.map(([city,c]) => `<tr>
             <td>${escapeHtml(city)}</td>
             <td style="font-family:var(--mono)">${fmt(c.leads)}</td>
             ${T ? `<td style="font-family:var(--mono)">${T[city] !== undefined ? fmt(T[city]) : '<span class="dim">—</span>'}</td>` : ''}
             <td style="font-family:var(--mono)">${fmt(c.done)}</td>
+            ${hasOrders ? `<td style="font-family:var(--mono)">${fmt(c.orders)}</td>` : ''}
             <td>${doneRateCell(c.done, c.leads)}</td>
             ${T ? `<td>${achCell(c.done, T[city])}</td>` : ''}
           </tr>`).join('')}
@@ -2311,6 +2315,7 @@ function renderLeads(){
             <td style="font-family:var(--mono)">${fmt(vs.length)}</td>
             ${T ? `<td style="font-family:var(--mono)">${fmt(totalTarget)}</td>` : ''}
             <td style="font-family:var(--mono)">${fmt(done)}</td>
+            ${hasOrders ? `<td style="font-family:var(--mono)">${fmt(doneOrders)}</td>` : ''}
             <td>${doneRateCell(done, vs.length)}</td>
             ${T ? `<td>${achCell(done, totalTarget)}</td>` : ''}
           </tr>
