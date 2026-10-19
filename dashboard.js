@@ -54,9 +54,11 @@ function tomanCompact(n){ return fmtCompact(n) + ' T'; }
    ============================================================
    The published file is dashboard_data.enc, written by encrypt.js. It's
    fetched as-is and only decrypted in-browser once the viewer enters a
-   valid password. v2 files (JSON envelope): gzipped data encrypted with a
-   random data key (AES-GCM), that key encrypted once per password under
-   PBKDF2-SHA256. v1 files (older encrypt.js, CryptoJS passphrase format)
+   valid username + password. v2/v3 files (JSON envelope): gzipped data
+   encrypted with a random data key (AES-GCM), that key encrypted once per
+   person under PBKDF2-SHA256. In v3 each person's key is derived from
+   password AND username, and their slot is found by a salted hash of the
+   username (slot.id) — the file never lists usernames. v1 files (older encrypt.js, CryptoJS passphrase format)
    are still read so a refresh made with an old checkout doesn't break
    the live page.
    ============================================================ */
@@ -93,12 +95,25 @@ async function gcmDecrypt(keyBytes, ivB64, ctB64){
   return new Uint8Array(await crypto.subtle.decrypt({ name:'AES-GCM', iv:b64ToBytes(ivB64) }, key, b64ToBytes(ctB64)));
 }
 
-async function unwrapDataKey(env, password){
+async function slotIdFor(saltBytes, username){
+  const key = await crypto.subtle.importKey('raw', saltBytes, { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('user:' + username)));
+  return bytesToB64(mac).slice(0, 22);
+}
+
+async function unwrapDataKey(env, username, password){
+  const salt = b64ToBytes(env.kdf.salt);
+  const user = env.v >= 3 ? username : '';
+  // v3: only the slot whose id matches this username; no username → shared-password slots.
+  const id = user ? await slotIdFor(salt, user) : null;
+  const slots = env.slots.filter(s => user ? s.id === id : !s.id);
+  const kdfSalt = user ? new Uint8Array([...salt, ...new TextEncoder().encode(':' + user)]) : salt;
   const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(password.normalize('NFC')), 'PBKDF2', false, ['deriveBits']);
+  // Derived even when no slot matched, so a wrong username takes as long as a wrong password.
   const kek = new Uint8Array(await crypto.subtle.deriveBits(
-    { name:'PBKDF2', hash:env.kdf.hash, salt:b64ToBytes(env.kdf.salt), iterations:env.kdf.iterations }, baseKey, 256));
-  for(const slot of env.slots){
-    try { return await gcmDecrypt(kek, slot.iv, slot.ct); } catch(e){ /* not this person's slot */ }
+    { name:'PBKDF2', hash:env.kdf.hash, salt:kdfSalt, iterations:env.kdf.iterations }, baseKey, 256));
+  for(const slot of slots){
+    try { return await gcmDecrypt(kek, slot.iv, slot.ct); } catch(e){ /* wrong password */ }
   }
   throw new Error('WRONG_PASSWORD');
 }
@@ -116,12 +131,12 @@ function decryptLegacy(ciphertext, password){
   return JSON.parse(plaintext);
 }
 
-async function unlockWithPassword(password){
+async function unlockWithPassword(username, password){
   if(!window.crypto || !crypto.subtle) throw new Error('this page must be opened over https://');
   const text = await fetchEncFile();
   if(!text.startsWith('{')) return { json: decryptLegacy(text, password), dataKey: null };
   const env = JSON.parse(text);
-  const dataKey = await unwrapDataKey(env, password);
+  const dataKey = await unwrapDataKey(env, username, password);
   return { json: await decryptPayload(env, dataKey), dataKey };
 }
 
@@ -143,7 +158,7 @@ function unlockDashboard(json){
   render();
 }
 
-function attemptUnlock(password){
+function attemptUnlock(username, password){
   const btn = document.getElementById('lockSubmit');
   const errEl = document.getElementById('lockError');
   btn.disabled = true;
@@ -152,7 +167,7 @@ function attemptUnlock(password){
   // Let the browser paint "Unlocking…" before the (partly synchronous)
   // decrypt/parse work starts, so the click never looks like it did nothing.
   setTimeout(() => {
-    unlockWithPassword(password)
+    unlockWithPassword(username, password)
       .then(({ json, dataKey }) => {
         // Cache the per-file data key, never the password itself.
         if(dataKey){ try { sessionStorage.setItem(SESSION_KEY, bytesToB64(dataKey)); } catch(e){} }
@@ -162,22 +177,25 @@ function attemptUnlock(password){
         btn.disabled = false;
         btn.textContent = 'Unlock';
         errEl.textContent = err.message === 'WRONG_PASSWORD'
-          ? 'Incorrect password — try again.'
+          ? 'Incorrect username or password — try again.'
           : 'Could not load dashboard data (' + err.message + ').';
       });
   }, 20);
 }
 
-document.getElementById('lockSubmit').addEventListener('click', () => {
+function submitLogin(){
+  const user = document.getElementById('lockUsername').value.trim().toLowerCase();
   const pw = document.getElementById('lockPassword').value;
-  if(pw) attemptUnlock(pw);
-});
-document.getElementById('lockPassword').addEventListener('keydown', (e) => {
-  if(e.key === 'Enter'){
-    const pw = document.getElementById('lockPassword').value;
-    if(pw) attemptUnlock(pw);
-  }
-});
+  if(!pw) return;
+  if(!user){ document.getElementById('lockUsername').focus(); }
+  attemptUnlock(user, pw);
+}
+document.getElementById('lockSubmit').addEventListener('click', submitLogin);
+['lockUsername','lockPassword'].forEach(id => document.getElementById(id).addEventListener('keydown', (e) => {
+  if(e.key !== 'Enter') return;
+  if(id === 'lockUsername' && !document.getElementById('lockPassword').value){ document.getElementById('lockPassword').focus(); return; }
+  submitLogin();
+}));
 
 // If this browser already unlocked this exact data file this session, skip the prompt.
 (function(){

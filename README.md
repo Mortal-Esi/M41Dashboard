@@ -60,29 +60,22 @@ password:
   password is entered — nobody can read the data via "View Source" or
   the browser's dev tools without the password, unlike a simple
   show/hide overlay.
-- The password itself lives in `password.local.js` — **not** in this
-  README, not in `encrypt.js`, and not anywhere else that gets
-  committed. That file is listed in `.gitignore` on purpose: the whole
-  point of encrypting the data is defeated if the password sits in
-  plain text in the same public repo as the ciphertext. Ask whoever
-  set up the dashboard for the current password out of band (chat,
-  in person, etc.), not through this file.
-- First-time setup: copy `password.local.js.example` to
-  `password.local.js` and put the real password in it:
+- **Each person has their own username + password.** Logins live in
+  `password.local.js` — **not** in this README, not in `encrypt.js`, and
+  not anywhere else that gets committed (it's in `.gitignore`). Manage it
+  with `make-users.js`, never by hand:
   ```
-  cp password.local.js.example password.local.js
+  node make-users.js add ali sara     # new users; prints their random 20-char passwords
+  node make-users.js reset ali        # new password for ali (old one stops working)
+  node make-users.js remove ali       # ali can no longer log in
+  node make-users.js list             # usernames only
   ```
-- To change the password: edit the value in your local
-  `password.local.js`, then run `node update_dashboard.js` again (or
-  `node encrypt.js` on its own if the data hasn't changed) and push.
-  Anyone with the old password will no longer be able to unlock the
-  dashboard after you republish. Share the new password with people
-  who need it the same way you shared the old one — never by
-  committing it anywhere.
-- Per-person passwords: `password.local.js` can instead export an
-  object, one entry per person (see `password.local.js.example`). To
-  revoke one person, delete their entry and republish — everyone else
-  keeps their password.
+  then run `refresh-dashboard.bat` so the live site picks up the change.
+  Send each person their own password privately.
+- Each person's key is derived from their password **and** their
+  username, so a password is useless with any other username. The public
+  file only contains a salted hash of each username, never the names.
+  Removing or resetting one person never changes anyone else's login.
 - Once someone unlocks, their browser keeps that file's decryption key
   (never the password) in `sessionStorage` for the tab, so they aren't
   asked again until they close it or the data is refreshed.
@@ -91,8 +84,11 @@ password:
   only allows scripts and network requests to this site, plus
   `noindex` so search engines skip it.
 - Old `dashboard_data.enc` versions stay in the public git history, each
-  under whichever password was current then — changing the password
-  doesn't retroactively protect them.
+  under whichever logins were current then — removing a user or
+  resetting a password only protects data published **after** that.
+- There is no OTP / 2FA: on a static site with no server, a one-time
+  code can't add real protection (anything the browser could check it
+  with would sit in the same public file). Real 2FA needs a server.
 
 **Honest caveat:** this is meaningfully stronger than a cosmetic
 JS gate (the raw published file is genuine ciphertext, not just hidden

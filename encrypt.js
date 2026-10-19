@@ -13,12 +13,16 @@
  * passwords offline — the slow key derivation is what makes each guess
  * expensive (the old format used a single MD5 round).
  *
- * The password(s) live in password.local.js, NOT in this file — that file is
- * gitignored and never committed. It can export either one shared password
- * string, or an object giving each person their own password:
- *   module.exports = { ali: '…', sara: '…' };
- * Removing someone's line and re-running revokes them without changing
- * anyone else's password.
+ * Format v3 (current) adds usernames: password.local.js exports
+ *   module.exports = { ali: '<password>', sara: '<password>' };
+ * (manage it with `node make-users.js`). Each person's key is derived from
+ * their password AND their username, so a password is useless without the
+ * matching username. The public file only carries a salted hash of each
+ * username (slot id), never the name itself. Removing someone's line and
+ * re-running revokes them without changing anyone else's password.
+ * A single shared password string is still accepted (no username).
+ *
+ * password.local.js is gitignored and never committed.
  */
 
 const fs = require('fs');
@@ -32,6 +36,17 @@ const ENC_PATH = path.join(__dirname, 'dashboard_data.enc');
 
 const KDF_ITERATIONS = 600000;
 const MIN_PASSWORD_LENGTH = 12;
+const USERNAME_RE = /^[a-z0-9._-]{2,32}$/;
+
+const normUser = (u) => String(u).trim().toLowerCase();
+// Slot id: salted hash of the username, so the public file lists no names.
+function slotId(salt, username) {
+  return crypto.createHmac('sha256', salt).update('user:' + username).digest('base64').slice(0, 22);
+}
+// KDF salt binds the key to the username ('' for a shared password).
+function kdfSalt(salt, username) {
+  return username ? Buffer.concat([salt, Buffer.from(':' + username, 'utf8')]) : salt;
+}
 
 function loadPasswords() {
   let config;
@@ -43,17 +58,22 @@ function loadPasswords() {
       'password.local.js and set your real password there, then try again.'
     );
   }
-  const entries = typeof config === 'string' ? [['(shared)', config]] : Object.entries(config || {});
-  const passwords = entries.filter(([, pw]) => typeof pw === 'string' && pw.length > 0);
-  if (passwords.length === 0 || passwords.some(([, pw]) => pw === 'CHANGE_ME')) {
-    throw new Error('Set a real password in password.local.js (it is empty or still has the CHANGE_ME placeholder).');
+  // [username, password]; username '' = one shared password, no username.
+  const entries = typeof config === 'string' ? [['', config]] : Object.entries(config || {}).map(([u, pw]) => [normUser(u), pw]);
+  const users = entries.filter(([, pw]) => typeof pw === 'string' && pw.length > 0);
+  if (users.length === 0 || users.some(([, pw]) => pw === 'CHANGE_ME')) {
+    throw new Error('Set a real password in password.local.js (it is empty or still has the CHANGE_ME placeholder). Run: node make-users.js add <username> …');
   }
-  for (const [label, pw] of passwords) {
+  const seen = new Set();
+  for (const [user, pw] of users) {
+    if (user && !USERNAME_RE.test(user)) throw new Error(`Invalid username "${user}" in password.local.js — use 2-32 of a-z 0-9 . _ -`);
+    if (seen.has(user)) throw new Error(`Username "${user}" appears twice in password.local.js.`);
+    seen.add(user);
     if (pw.length < MIN_PASSWORD_LENGTH) {
-      console.warn(`WARNING: password for ${label} is under ${MIN_PASSWORD_LENGTH} characters — the .enc file is public, so a short password can be guessed offline.`);
+      console.warn(`WARNING: password for ${user || '(shared)'} is under ${MIN_PASSWORD_LENGTH} characters — the .enc file is public, so a short password can be guessed offline.`);
     }
   }
-  return passwords.map(([, pw]) => pw);
+  return users;
 }
 
 function gcmEncrypt(key, plaintext) {
@@ -68,13 +88,13 @@ function encryptDashboardData(passwords = loadPasswords()) {
   const compressed = zlib.gzipSync(fs.readFileSync(JSON_PATH), { level: 9 });
   const salt = crypto.randomBytes(16);
   const dataKey = crypto.randomBytes(32);
-  const slots = passwords.map((pw) => {
-    const kek = crypto.pbkdf2Sync(pw.normalize('NFC'), salt, KDF_ITERATIONS, 32, 'sha256');
-    return gcmEncrypt(kek, dataKey);
+  const slots = passwords.map(([user, pw]) => {
+    const kek = crypto.pbkdf2Sync(pw.normalize('NFC'), kdfSalt(salt, user), KDF_ITERATIONS, 32, 'sha256');
+    return user ? { id: slotId(salt, user), ...gcmEncrypt(kek, dataKey) } : gcmEncrypt(kek, dataKey);
   });
   const payload = gcmEncrypt(dataKey, compressed);
   const envelope = {
-    v: 2,
+    v: 3,
     kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: KDF_ITERATIONS, salt: salt.toString('base64') },
     slots,
     iv: payload.iv,
@@ -82,7 +102,8 @@ function encryptDashboardData(passwords = loadPasswords()) {
   };
   const out = JSON.stringify(envelope);
   fs.writeFileSync(ENC_PATH, out, 'utf-8');
-  console.log(`Encrypted → ${ENC_PATH} (${(out.length / 1024).toFixed(0)} KB, ${slots.length} password slot${slots.length === 1 ? '' : 's'})`);
+  const named = passwords.filter(([u]) => u).map(([u]) => u);
+  console.log(`Encrypted → ${ENC_PATH} (${(out.length / 1024).toFixed(0)} KB, ${slots.length} slot${slots.length === 1 ? '' : 's'}${named.length ? ': ' + named.join(', ') : ', shared password'})`);
   return ENC_PATH;
 }
 

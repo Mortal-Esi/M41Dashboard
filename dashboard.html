@@ -182,8 +182,9 @@
 <div id="lockScreen">
   <div class="lock-box">
     <div class="lock-title">Meal4One <span>Dashboard</span></div>
-    <div class="lock-sub">Enter the password to view this dashboard</div>
-    <input type="password" id="lockPassword" placeholder="Password" autocomplete="off" />
+    <div class="lock-sub">Sign in to view this dashboard</div>
+    <input type="text" id="lockUsername" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" style="margin-bottom:8px" />
+    <input type="password" id="lockPassword" placeholder="Password" autocomplete="current-password" />
     <button id="lockSubmit">Unlock</button>
     <div class="lock-error" id="lockError"></div>
   </div>
