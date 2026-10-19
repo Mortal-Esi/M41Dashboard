@@ -209,12 +209,20 @@ function parseLeadPoolTab(title, now = new Date()) {
  * leadPools: [{ title, rows }] — one per "Lead Pool (<Month>)" tab.
  * daily: readDailyJiraFile() result ({rows} or {error}).
  *
- * A lead counts as Done for a month when the vendor has a Jira issue with
- * Current Status "Done" that was created on/after that month's 1st. Done
- * issues created before the month (an earlier deal) are counted separately
- * as doneBefore, not as Done.
+ * mainRows: MainData rows (pack level, unfiltered).
+ *
+ * A lead counts as Done for a month when EITHER
+ *   - Jira: the vendor has an issue created on/after that month's 1st whose
+ *     Current Status is Done, or a later stage than negotiation (Content QC,
+ *     Discount & Coupon, Pack Freezing & Upload to Carousel); OR
+ *   - MainData: the vendor has an active pack (Activity 1, not deleted) or
+ *     M4O orders this month (vendor_m41_Orders_MTD > 0).
+ * Done-stage issues created before the month only (an earlier deal) are
+ * reported as doneBefore, not as Done.
  */
-function buildLeadsModule({ leadPools, daily, now = new Date() }) {
+const DONE_STAGE_RE = /^(done|content ?qc|discount ?(&|and)? ?coupon|pack freezing.*)$/i;
+
+function buildLeadsModule({ leadPools, daily, mainRows = [], now = new Date() }) {
   const months = leadPools
     .map((lp) => ({ ...lp, month: parseLeadPoolTab(lp.title, now) }))
     .filter((lp) => lp.month)
@@ -228,9 +236,18 @@ function buildLeadsModule({ leadPools, daily, now = new Date() }) {
     const vid = clean(r.vendorid);
     if (!vid || vid === '-') continue;
     vendorsInJira.add(vid);
-    if (clean(r.currentstatus).toLowerCase() !== 'done') continue;
+    if (!DONE_STAGE_RE.test(clean(r.currentstatus))) continue;
     if (!doneIssuesByVendor.has(vid)) doneIssuesByVendor.set(vid, []);
     doneIssuesByVendor.get(vid).push({ key: clean(r.issuekey) || null, created: toNum(r.created, 0) });
+  }
+
+  // MainData only reflects the current state, so it's the same for every month.
+  const liveInMainData = new Set();
+  for (const r of mainRows) {
+    const vid = clean(r.VendorID);
+    if (!vid) continue;
+    const active = toNum(r.Activity) === 1 && toNum(r.Deleted) === 0;
+    if (active || toNum(r.vendor_m41_Orders_MTD) > 0) liveInMainData.add(vid);
   }
 
   const byMonth = {};
@@ -243,14 +260,18 @@ function buildLeadsModule({ leadPools, daily, now = new Date() }) {
       seen.add(vid);
       const done = (doneIssuesByVendor.get(vid) || []);
       const doneIn = done.filter((i) => i.created >= month.start).sort((a, b) => a.created - b.created);
+      const jiraDone = doneIn.length > 0;
+      const mainDone = liveInMainData.has(vid);
       vendors.push({
         id: vid,
         name: clean(r.Title),
         city: clean(r.City) || '—',
         inJira: vendorsInJira.has(vid) ? 1 : 0,
-        done: doneIn.length ? 1 : 0,
-        doneKey: doneIn.length ? doneIn[0].key : null,
-        doneBefore: !doneIn.length && done.length ? 1 : 0,
+        done: jiraDone || mainDone ? 1 : 0,
+        jiraDone: jiraDone ? 1 : 0,
+        mainDone: mainDone ? 1 : 0,
+        doneKey: jiraDone ? doneIn[0].key : null,
+        doneBefore: !jiraDone && !mainDone && done.length ? 1 : 0,
       });
     }
     byMonth[month.key] = { label: month.label, vendors };

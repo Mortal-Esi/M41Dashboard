@@ -438,6 +438,7 @@ async function main() {
       leadsOutput = buildLeadsModule({
         leadPools: poolTabs.map((t, i) => ({ title: t, rows: poolRows[i] })),
         daily,
+        mainRows: mainRaw,
       });
       if (leadsOutput) {
         for (const k of leadsOutput.months) {

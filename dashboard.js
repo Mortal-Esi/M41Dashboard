@@ -2218,6 +2218,8 @@ function renderLeads(){
   }
 
   const done = vs.filter(v => v.done).length;
+  const viaJira = vs.filter(v => v.jiraDone).length;
+  const viaMainOnly = vs.filter(v => v.mainDone && !v.jiraDone).length;
   const doneBefore = vs.filter(v => v.doneBefore).length;
   const notInJira = vs.filter(v => !v.inJira).length;
   const byCity = new Map();
@@ -2231,17 +2233,17 @@ function renderLeads(){
   return `
     ${breadcrumb([M.label])}
     <div class="flex-between">
-      <div class="section-note" style="margin:0">Leads in the <b>Lead Pool (${escapeHtml(monthName)})</b> sheet tab that have a Jira issue with status <b>Done</b>, created in ${escapeHtml(monthName)} or later. Jira file: <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC).</div>
+      <div class="section-note" style="margin:0">A lead from the <b>Lead Pool (${escapeHtml(monthName)})</b> sheet tab is <b>Done</b> if it has a Jira issue created in ${escapeHtml(monthName)} or later in Done, Content QC, Discount &amp; Coupon or Pack Freezing — <b>or</b> an active pack (Activity 1, not deleted) or M4O orders this month in MainData. Jira file: <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC).</div>
       ${L.months.length > 1 ? `<select id="leadsMonthSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
         ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
       </select>` : ''}
     </div>
     <div class="stat-row">
       <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
-      <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div></div>
+      <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div><div class="sub">${fmt(viaJira)} via Jira · ${fmt(viaMainOnly)} via MainData only</div></div>
       <div class="stat-card accent"><div class="label">Done %</div><div class="value">${vs.length ? pct1(done/vs.length*100) : '—'}</div></div>
     </div>
-    ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done issue from before ${escapeHtml(monthName)} only — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
+    ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done-stage Jira issue from before ${escapeHtml(monthName)} only (and nothing live in MainData) — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
     <div class="table-wrap">
       <table>
         <thead><tr><th>City</th><th>Leads</th><th>Done</th><th>Done %</th></tr></thead>
