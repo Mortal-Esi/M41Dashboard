@@ -300,6 +300,49 @@ function recomputePackBlock(packs){
     packs,
   };
 }
+// Availability split: of the active packs (Activity 1, not deleted) in each
+// group, what share got at least one impression yesterday.
+function availabilitySplit(packs){
+  const one = (ps) => { const act = ps.filter(x=>x.isActive); const hit = act.filter(x=>x.hasImpression).length; return { active:act.length, withImpression:hit, pct: act.length ? Math.round(hit/act.length*1000)/10 : 0 }; };
+  return { total: one(packs), nonKitchen: one(packs.filter(x=>!x.kitchen)), kitchen: one(packs.filter(x=>x.kitchen)) };
+}
+function availabilityCards(packs){
+  const a = availabilitySplit(packs);
+  const card = (label, v, cls) => `<div class="stat-card ${cls}"><div class="label">${label}</div><div class="value small">${pct1(v.pct)}</div><div class="sub">${fmt(v.withImpression)} / ${fmt(v.active)} active packs</div></div>`;
+  return card('Availability — Total', a.total, 'seg-a') + card('Availability — Non-Kitchen', a.nonKitchen, 'seg-b') + card('Availability — Kitchen', a.kitchen, 'purple');
+}
+function packsOfBlock(block){
+  if(block.packs) return block.packs;
+  if(block.areas) return Object.values(block.areas).flatMap(a => a.packs || []);
+  return Object.values(block.byCity || {}).flatMap(c => Object.values(c.areas).flatMap(a => a.packs || []));
+}
+
+// Rating buckets for Total / Non-Kitchen / Kitchen, from per-pack rows.
+function ratingKitchenSection(rows){
+  if(!rows.length) return '';
+  if(rows[0].kitchen === undefined){
+    return `<div class="section-note">Kitchen / Non-Kitchen split needs fresh data — re-run <code>node update_dashboard.js</code>.</div>`;
+  }
+  const groups = [['Total', rows], ['Non-Kitchen', rows.filter(r=>!r.kitchen)], ['Kitchen', rows.filter(r=>r.kitchen)]];
+  return `
+    <div class="section-title">Kitchen vs. Non-Kitchen</div>
+    <div class="table-wrap" style="margin-bottom:22px">
+      <table>
+        <thead><tr><th>Group</th><th>Packs</th><th>Avg Rate</th><th>Rated</th><th>No Rating</th>${BUCKET_ORDER.map(b=>`<th>${b}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${groups.map(([label, rs]) => { const v = recomputeRatingBlock(rs); return `<tr${label==='Total'?' style="font-weight:600"':''}>
+            <td>${label==='Kitchen'?'<span class="badge kit" style="margin-left:0">Kitchen</span>':escapeHtml(label)}</td>
+            <td style="font-family:var(--mono)">${fmt(rs.length)}</td>
+            <td style="font-family:var(--mono); color:var(--accent); font-weight:600">${v.ratedCount ? v.avgRate.toFixed(2) : '—'}</td>
+            <td>${fmt(v.ratedCount)} <span class="dim">(${pct1(v.ratedCount_pct)})</span></td>
+            <td style="color:var(--warn)">${fmt(v.noRatingCount)} <span class="dim">(${pct1(v.noRatingCount_pct)})</span></td>
+            ${BUCKET_ORDER.map(b => `<td>${fmt(v.buckets[b]||0)} <span class="dim">(${pct1(v.bucketPcts[b]||0)})</span></td>`).join('')}
+          </tr>`; }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 function recomputeRatingBlock(rows){
   const p = (n,d) => d ? Math.round(n/d*1000)/10 : 0;
   const rated = rows.filter(r=>r.bucket!==null);
@@ -864,7 +907,7 @@ function renderPackDistribution(){
         <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(overall.discountSubsidy)}<span class="pct-tag">${pct1(overall.discountSubsidy_pct)}</span></div></div>
         <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(overall.couponSubsidy)}<span class="pct-tag">${pct1(overall.couponSubsidy_pct)}</span></div></div>
         <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(overall.avgSnappDiscountToman)}</div></div>
-        <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(overall.availability_pct)}</div><div class="sub">Share of Activity==1 packs that got at least one impression</div></div>
+        ${availabilityCards(filtered ? overall.packs : packsOfBlock(pd))}
       </div>
       <div class="chart-row">
         <div class="chart-box"><h3>Deal Type Distribution</h3><canvas id="dealTypeChart"></canvas></div>
@@ -894,7 +937,7 @@ function renderPackDistribution(){
         <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(cBlock.discountSubsidy)}<span class="pct-tag">${pct1(cBlock.discountSubsidy_pct)}</span></div></div>
         <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(cBlock.couponSubsidy)}<span class="pct-tag">${pct1(cBlock.couponSubsidy_pct)}</span></div></div>
         <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(cBlock.avgSnappDiscountToman)}</div></div>
-        <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(cBlock.availability_pct)}</div></div>
+        ${availabilityCards(filtered ? cBlock.packs : packsOfBlock(cdata))}
       </div>
       <div class="section-title">Marketing Areas (${areas.length})</div>
       <div class="card-grid">
@@ -914,7 +957,7 @@ function renderPackDistribution(){
       <div class="stat-card"><div class="label">Discount Subsidy</div><div class="value small">${fmt(adata.discountSubsidy)}<span class="pct-tag">${pct1(adata.discountSubsidy_pct)}</span></div></div>
       <div class="stat-card"><div class="label">Coupon Subsidy</div><div class="value small">${fmt(adata.couponSubsidy)}<span class="pct-tag">${pct1(adata.couponSubsidy_pct)}</span></div></div>
       <div class="stat-card accent"><div class="label">Avg Snapp Discount (non-Kitchen)</div><div class="value small">${toman(adata.avgSnappDiscountToman)}</div></div>
-      <div class="stat-card seg-a"><div class="label">Availability</div><div class="value small">${pct1(adata.availability_pct)}</div></div>
+      ${availabilityCards(adata.packs)}
     </div>
     <input class="search-box" id="packSearch" placeholder="Filter packs by title or vendor…">
     <div class="table-wrap">
@@ -1221,6 +1264,7 @@ function renderRating(){
         ${BUCKET_ORDER.map(b => `<div class="stat-card"><div class="label">${b}</div><div class="value small">${fmt(overall.buckets[b]||0)}<span class="pct-tag">${pct1(overall.bucketPcts[b]||0)}</span></div></div>`).join('')}
       </div>
       <div class="section-note">Percentages for 0-2…8-10 are of rated packs only; No Rating packs (Rate=0) are excluded from the average and bucket %s.</div>
+      ${ratingKitchenSection(filtered ? cities.flatMap(([city])=>r.byCity[city].rows.filter(matchesSuperType)) : (r.rows || Object.values(r.byCity).flatMap(c=>c.rows)))}
       <div class="chart-row">
         <div class="chart-box"><h3>Rate Distribution (all cities, rated only)</h3><canvas id="ratingBucketChart"></canvas></div>
         <div class="chart-box"><h3>Avg Rate by City</h3><canvas id="cityRateChart"></canvas></div>
@@ -1260,6 +1304,7 @@ function renderRating(){
       <div class="stat-card warn"><div class="label">No Rating</div><div class="value small">${fmt(cBlock.noRatingCount)}<span class="pct-tag">${pct1(cBlock.noRatingCount_pct)}</span></div></div>
       ${BUCKET_ORDER.map(b => `<div class="stat-card"><div class="label">${b}</div><div class="value small">${fmt(cBlock.buckets[b]||0)}<span class="pct-tag">${pct1(cBlock.bucketPcts[b]||0)}</span></div></div>`).join('')}
     </div>
+    ${ratingKitchenSection(filtered ? cdata.rows.filter(matchesSuperType) : cdata.rows)}
     <div class="section-title">Marketing Areas (${areas.length})</div>
     <div class="table-wrap">
       <table>
@@ -2229,6 +2274,9 @@ function renderLeads(){
   }
   const cities = [...byCity.entries()].sort((a,b) => b[1].leads - a[1].leads);
   const js = L.jiraSource;
+  const T = M.targets || null;
+  const totalTarget = T ? T.__total__ : null;
+  const achCell = (doneN, target) => target ? doneRateCell(doneN, target) : '<span class="dim">—</span>';
 
   return `
     ${breadcrumb([M.label])}
@@ -2241,24 +2289,30 @@ function renderLeads(){
     <div class="stat-row">
       <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
       <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div><div class="sub">${fmt(viaJira)} via Jira · ${fmt(viaMainOnly)} via MainData only</div></div>
-      <div class="stat-card accent"><div class="label">Done %</div><div class="value">${vs.length ? pct1(done/vs.length*100) : '—'}</div></div>
+      <div class="stat-card accent"><div class="label">Conversion (Done / Leads)</div><div class="value">${vs.length ? pct1(done/vs.length*100) : '—'}</div></div>
+      ${T ? `<div class="stat-card"><div class="label">Total Vendor Target</div><div class="value">${fmt(totalTarget)}</div></div>
+      <div class="stat-card seg-b"><div class="label">Target Achieved (Done / Target)</div><div class="value">${totalTarget ? pct1(done/totalTarget*100) : '—'}</div></div>` : ''}
     </div>
     ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done-stage Jira issue from before ${escapeHtml(monthName)} only (and nothing live in MainData) — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>City</th><th>Leads</th><th>Done</th><th>Done %</th></tr></thead>
+        <thead><tr><th>City</th><th>Leads</th>${T?'<th>Vendor Target</th>':''}<th>Done</th><th>Conversion</th>${T?'<th>Target Achieved</th>':''}</tr></thead>
         <tbody>
           ${cities.map(([city,c]) => `<tr>
             <td>${escapeHtml(city)}</td>
             <td style="font-family:var(--mono)">${fmt(c.leads)}</td>
+            ${T ? `<td style="font-family:var(--mono)">${T[city] !== undefined ? fmt(T[city]) : '<span class="dim">—</span>'}</td>` : ''}
             <td style="font-family:var(--mono)">${fmt(c.done)}</td>
             <td>${doneRateCell(c.done, c.leads)}</td>
+            ${T ? `<td>${achCell(c.done, T[city])}</td>` : ''}
           </tr>`).join('')}
           <tr style="font-weight:600">
             <td>Total</td>
             <td style="font-family:var(--mono)">${fmt(vs.length)}</td>
+            ${T ? `<td style="font-family:var(--mono)">${fmt(totalTarget)}</td>` : ''}
             <td style="font-family:var(--mono)">${fmt(done)}</td>
             <td>${doneRateCell(done, vs.length)}</td>
+            ${T ? `<td>${achCell(done, totalTarget)}</td>` : ''}
           </tr>
         </tbody>
       </table>
