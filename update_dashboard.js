@@ -38,7 +38,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID || LOCAL_CONFIG.SPREADSHEET_ID
 const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_SPREADSHEET_ID_HERE'; // Coverage_Radius sheet (CityCoverage/CoverageResult)
 const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
 const COVERAGE_HISTORY_SPREADSHEET_ID = process.env.COVERAGE_HISTORY_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_HISTORY_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_HISTORY_SPREADSHEET_ID_HERE'; // per-day tabs of area coverage snapshots
-const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>) tabs
+const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>) tabs + Overview (Total Vendor Target)
 
 const SHEET_NAMES = {
   mainData: 'MainData',
@@ -430,7 +430,10 @@ async function main() {
     } else {
       const titles = await listSheetTitles(sheets, LEADS_SPREADSHEET_ID);
       const poolTabs = titles.filter((t) => /^lead pool\s*\(.+\)$/i.test(t.trim()));
-      const poolRows = await Promise.all(poolTabs.map((t) => fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, t)));
+      const [poolRows, overviewRows] = await Promise.all([
+        Promise.all(poolTabs.map((t) => fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, t))),
+        titles.includes('Overview') ? fetchSheetAsObjects(sheets, LEADS_SPREADSHEET_ID, 'Overview') : [],
+      ]);
       const daily = readDailyJiraFile(__dirname);
       console.log(daily.rows
         ? `  Daily Jira file: ${daily.file} (${daily.rows.length} issues, saved ${daily.modifiedAt.slice(0, 16).replace('T', ' ')} UTC)`
@@ -439,6 +442,7 @@ async function main() {
         leadPools: poolTabs.map((t, i) => ({ title: t, rows: poolRows[i] })),
         daily,
         mainRows: mainRaw,
+        overviewRows,
       });
       if (leadsOutput) {
         for (const k of leadsOutput.months) {
@@ -635,7 +639,7 @@ async function main() {
       noRatingCount: noRating, noRatingCount_pct: pct(noRating, totalAll),
       buckets, bucketPcts,
       // raw per-row data for client-side SuperType filtering
-      rows: rowsAll.map((r) => ({ rate: toNum(r.Rate, 0), bucket: r._RateBucket, superTypeId: toNum(r.SuperTypeID, null) })),
+      rows: rowsAll.map((r) => ({ rate: toNum(r.Rate, 0), bucket: r._RateBucket, superTypeId: toNum(r.SuperTypeID, null), kitchen: r._IsKitchen ? 1 : 0 })),
     };
   }
 

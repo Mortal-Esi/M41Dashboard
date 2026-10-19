@@ -222,7 +222,25 @@ function parseLeadPoolTab(title, now = new Date()) {
  */
 const DONE_STAGE_RE = /^(done|content ?qc|discount ?(&|and)? ?coupon|pack freezing.*)$/i;
 
-function buildLeadsModule({ leadPools, daily, mainRows = [], now = new Date() }) {
+// Overview tab → { city: Total Vendor Target, __total__: n }. Uses the sheet's
+// own "Total" row when present, otherwise the sum of the cities.
+function parseVendorTargets(overviewRows) {
+  const out = {};
+  let sum = 0;
+  for (const r of overviewRows || []) {
+    const city = clean(r.City);
+    const t = toNum(r['Total Vendor Target'], null);
+    if (!city || t === null) continue;
+    if (city.toLowerCase() === 'total') { out.__total__ = t; continue; }
+    out[city] = t;
+    sum += t;
+  }
+  if (Object.keys(out).length === 0) return null;
+  if (out.__total__ === undefined) out.__total__ = sum;
+  return out;
+}
+
+function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], now = new Date() }) {
   const months = leadPools
     .map((lp) => ({ ...lp, month: parseLeadPoolTab(lp.title, now) }))
     .filter((lp) => lp.month)
@@ -250,6 +268,9 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], now = new Date() })
     if (active || toNum(r.vendor_m41_Orders_MTD) > 0) liveInMainData.add(vid);
   }
 
+  const targets = parseVendorTargets(overviewRows);
+  const latestKey = months[months.length - 1].month.key;
+
   const byMonth = {};
   for (const { rows: poolRows, month } of months) {
     const seen = new Set();
@@ -274,7 +295,9 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], now = new Date() })
         doneBefore: !jiraDone && !mainDone && done.length ? 1 : 0,
       });
     }
-    byMonth[month.key] = { label: month.label, vendors };
+    // The Overview tab has no month in its name, so its targets belong to
+    // the latest month only — older months show no target, not a wrong one.
+    byMonth[month.key] = { label: month.label, vendors, targets: month.key === latestKey ? targets : null };
   }
 
   return {
