@@ -2248,6 +2248,7 @@ function drawCoverageHistoryCharts(gridColor){
 let leadsMonth = null;
 const leadsCities = new Set(); // empty = all cities
 let leadsDrillCity = null;      // city whose lead list is open
+let leadsCityExport = null;     // the city table as last rendered, for Excel export
 let leadsStatusFilter = 'all';  // 'all' | 'done' | 'notdone'
 const LEAD_CLASS_ORDER = { TopCritical:0, Critical:1, Important:2, Ordinary:3 };
 
@@ -2362,6 +2363,16 @@ function renderLeads(){
   // With a city filter, the target is the sum of the picked cities' targets.
   const totalTarget = !T ? null : drillCity ? (T[drillCity] ?? null) : filterOn ? picked.reduce((s,c) => s + (T[c] || 0), 0) : T.__total__;
   const achCell = (doneN, target) => target ? doneRateCell(doneN, target) : '<span class="dim">—</span>';
+  // Same rows as the city table below (respects the city filter), as numbers.
+  {
+    const head = ['City', 'Leads', ...(T?['Vendor Target']:[]), 'Done', ...(hasOrders?['Orders MTD (Done)']:[]), 'Conversion', ...(T?['Target Achieved']:[])];
+    const row = (name, leads, target, doneN, orders) => [name, leads, ...(T?[target ?? null]:[]), doneN, ...(hasOrders?[orders]:[]),
+      { v: leads ? doneN/leads : null, fmt:'pct' }, ...(T?[{ v: target ? doneN/target : null, fmt:'pct' }]:[])];
+    leadsCityExport = {
+      month: M.label,
+      rows: [head, ...cities.map(([city,c]) => row(city, c.leads, T ? T[city] : null, c.done, c.orders)), row(filterOn ? `Total (${picked.length} cities)` : 'Total', vs.length, totalTarget, done, doneOrders)],
+    };
+  }
 
   return `
     ${drillCity ? breadcrumb([M.label, drillCity], ['ld-city-null']) : breadcrumb([M.label])}
@@ -2381,7 +2392,11 @@ function renderLeads(){
       <div class="stat-card seg-b"><div class="label">Target Achieved (Done / Target)</div><div class="value">${totalTarget ? pct1(done/totalTarget*100) : '—'}</div></div>` : ''}
     </div>
     ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done-stage Jira issue from before ${escapeHtml(monthName)} only (and nothing live in MainData) — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
-    ${drillCity ? leadListSection(vs) : `<div class="table-wrap">
+    ${drillCity ? leadListSection(vs) : `<div class="flex-between" style="margin-bottom:10px">
+      <div class="section-title" style="margin:0">Cities</div>
+      <button id="leadsExportBtn" class="toggle-btn" style="border:1px solid var(--border); background:var(--panel-2); cursor:pointer; font:inherit; font-size:12.5px; color:var(--text)">⬇ Export Excel</button>
+    </div>
+    <div class="table-wrap">
       <table>
         <thead><tr><th>City</th><th>Leads</th>${T?'<th>Vendor Target</th>':''}<th>Done</th>${hasOrders?'<th>Orders MTD (Done)</th>':''}<th>Conversion</th>${T?'<th>Target Achieved</th>':''}</tr></thead>
         <tbody>
@@ -2435,6 +2450,14 @@ function attachCoverageHistoryLeadsHandlers(){
   });
   document.querySelectorAll('[data-leadstatus]').forEach(el => {
     el.addEventListener('click', () => { leadsStatusFilter = el.dataset.leadstatus; render(); });
+  });
+  const exportBtn = document.getElementById('leadsExportBtn');
+  if(exportBtn) exportBtn.addEventListener('click', () => {
+    if(!leadsCityExport) return;
+    const { month, rows } = leadsCityExport;
+    const blob = buildXlsx(rows, { sheetName: 'Lead Tracking', boldRows: [0, rows.length-1], widths: rows[0].map((h,i) => i===0 ? 22 : 16) });
+    const stamp = new Date().toISOString().slice(0,10);
+    downloadBlob(blob, `Lead Tracking - ${month} - ${stamp}.xlsx`);
   });
   const leadsListSearch = document.getElementById('leadsListSearch');
   if(leadsListSearch) leadsListSearch.addEventListener('input', () => filterTable('leadsListTable', leadsListSearch.value));
@@ -2563,6 +2586,64 @@ function attachHandlers(){
 
   attachCoverageHistoryLeadsHandlers();
   drawCharts();
+}
+
+/* ============================================================
+   XLSX EXPORT — a minimal .xlsx writer (no library: the page's CSP only
+   allows this site's own scripts). One sheet, inline strings, uncompressed
+   ZIP. cells: string | number | {v:number, fmt:'int'|'pct'}; bold rows
+   via opts.boldRows (row indexes).
+   ============================================================ */
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n]=c>>>0; } return t; })();
+function crc32(bytes){ let c = 0xFFFFFFFF; for(let i=0;i<bytes.length;i++) c = CRC_TABLE[(c^bytes[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function zipStore(files){
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  const u16 = (n) => [n&0xFF, (n>>>8)&0xFF], u32 = (n) => [n&0xFF, (n>>>8)&0xFF, (n>>>16)&0xFF, (n>>>24)&0xFF];
+  for(const [name, text] of files){
+    const nameB = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const common = [...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(nameB.length)];
+    const local = new Uint8Array([...u32(0x04034b50), ...common, ...u16(0), ...nameB]);
+    parts.push(local, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...common, ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...nameB]));
+    offset += local.length + data.length;
+  }
+  const cdSize = central.reduce((s,c) => s + c.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  return new Blob([...parts, ...central, end], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function buildXlsx(rows, opts = {}){
+  const xmlEsc = (v) => String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  const col = (i) => { let s=''; i++; while(i){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; };
+  const bold = new Set(opts.boldRows || []);
+  // Styles: 0 plain, 1 bold, 2 int, 3 bold int, 4 pct, 5 bold pct.
+  const sheetRows = rows.map((r, ri) => `<row r="${ri+1}">${r.map((cell, ci) => {
+    const ref = col(ci) + (ri+1), b = bold.has(ri) ? 1 : 0;
+    if(cell === null || cell === undefined || cell === '') return '';
+    if(typeof cell === 'object'){
+      if(cell.v === null || cell.v === undefined || !isFinite(cell.v)) return '';
+      return `<c r="${ref}" s="${(cell.fmt==='pct'?4:2)+b}"><v>${cell.v}</v></c>`;
+    }
+    if(typeof cell === 'number') return `<c r="${ref}" s="${2+b}"><v>${cell}</v></c>`;
+    return `<c r="${ref}" s="${b}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(cell)}</t></is></c>`;
+  }).join('')}</row>`).join('');
+  const widths = (opts.widths || []).map((w,i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('');
+  const files = [
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlEsc((opts.sheetName||'Sheet1').slice(0,31))}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyFont="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/><xf numFmtId="3" fontId="1" fillId="0" borderId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="1" fillId="0" borderId="0" applyNumberFormat="1" applyFont="1"/></cellXfs></styleSheet>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${widths ? `<cols>${widths}</cols>` : ''}<sheetData>${sheetRows}</sheetData></worksheet>`],
+  ];
+  return zipStore(files);
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function filterTable(tableId, query){
