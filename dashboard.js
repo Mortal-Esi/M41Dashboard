@@ -2246,6 +2246,7 @@ function drawCoverageHistoryCharts(gridColor){
    MODULE: LEAD TRACKING (how many of the month's leads got Done in Jira)
    ============================================================ */
 let leadsMonth = null;
+const leadsCities = new Set(); // empty = all cities
 
 function leadsMonthData(){
   const L = DATA.leads;
@@ -2267,7 +2268,7 @@ function renderLeads(){
   }
   const M = leadsMonthData();
   const monthName = M.label.split(' ')[0];
-  const vs = M.vendors;
+  let vs = M.vendors;
 
   if(!L.jiraSource){
     return `
@@ -2279,6 +2280,19 @@ function renderLeads(){
         ${fmt(vs.length)} leads were found in the lead pool.
       </div>`;
   }
+
+  // City filter (multi-select). Cities picked in another month that don't
+  // exist in this one are simply ignored.
+  const allCityCounts = new Map();
+  for(const v of vs) allCityCounts.set(v.city, (allCityCounts.get(v.city) || 0) + 1);
+  const picked = [...leadsCities].filter(c => allCityCounts.has(c));
+  const filterOn = picked.length > 0;
+  const cityBar = `<div class="filter-bar">
+    <span class="flabel">City</span>
+    <span class="filter-chip ${filterOn?'':'active'}" data-leadcity="__all__">All</span>
+    ${[...allCityCounts.entries()].sort((a,b) => b[1]-a[1]).map(([c,n]) => `<span class="filter-chip ${leadsCities.has(c)?'active':''}" data-leadcity="${escapeAttr(c)}">${escapeHtml(c)} <span style="opacity:.6">${fmt(n)}</span></span>`).join('')}
+  </div>`;
+  if(filterOn) vs = vs.filter(v => leadsCities.has(v.city));
 
   const done = vs.filter(v => v.done).length;
   const doneOrders = vs.filter(v => v.done).reduce((s,v) => s + (v.ordersMtd || 0), 0);
@@ -2295,7 +2309,8 @@ function renderLeads(){
   const cities = [...byCity.entries()].sort((a,b) => b[1].leads - a[1].leads);
   const js = L.jiraSource;
   const T = M.targets || null;
-  const totalTarget = T ? T.__total__ : null;
+  // With a city filter, the target is the sum of the picked cities' targets.
+  const totalTarget = !T ? null : filterOn ? picked.reduce((s,c) => s + (T[c] || 0), 0) : T.__total__;
   const achCell = (doneN, target) => target ? doneRateCell(doneN, target) : '<span class="dim">—</span>';
 
   return `
@@ -2306,6 +2321,7 @@ function renderLeads(){
         ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
       </select>` : ''}
     </div>
+    ${cityBar}
     <div class="stat-row">
       <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
       <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div><div class="sub">${fmt(viaJira)} via Jira · ${fmt(viaMainOnly)} via MainData only</div></div>
@@ -2329,7 +2345,7 @@ function renderLeads(){
             ${T ? `<td>${achCell(c.done, T[city])}</td>` : ''}
           </tr>`).join('')}
           <tr style="font-weight:600">
-            <td>Total</td>
+            <td>Total${filterOn ? ` <span class="dim" style="font-weight:400">(${picked.length} cit${picked.length===1?'y':'ies'})</span>` : ''}</td>
             <td style="font-family:var(--mono)">${fmt(vs.length)}</td>
             ${T ? `<td style="font-family:var(--mono)">${fmt(totalTarget)}</td>` : ''}
             <td style="font-family:var(--mono)">${fmt(done)}</td>
@@ -2354,6 +2370,15 @@ function attachCoverageHistoryLeadsHandlers(){
   });
   document.querySelectorAll('[data-chrange]').forEach(el => {
     el.addEventListener('click', () => { covHistRange = Number(el.dataset.chrange); render(); });
+  });
+  document.querySelectorAll('[data-leadcity]').forEach(el => {
+    el.addEventListener('click', () => {
+      const c = el.dataset.leadcity;
+      if(c === '__all__') leadsCities.clear();
+      else if(leadsCities.has(c)) leadsCities.delete(c);
+      else leadsCities.add(c);
+      render();
+    });
   });
   const monthSel = document.getElementById('leadsMonthSelect');
   if(monthSel) monthSel.addEventListener('change', () => { leadsMonth = monthSel.value; render(); });
