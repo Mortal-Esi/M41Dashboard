@@ -2247,6 +2247,53 @@ function drawCoverageHistoryCharts(gridColor){
    ============================================================ */
 let leadsMonth = null;
 const leadsCities = new Set(); // empty = all cities
+let leadsDrillCity = null;      // city whose lead list is open
+let leadsStatusFilter = 'all';  // 'all' | 'done' | 'notdone'
+const LEAD_CLASS_ORDER = { TopCritical:0, Critical:1, Important:2, Ordinary:3 };
+
+function leadStatusCell(v){
+  if(v.done){
+    const why = v.doneStatus ? (v.doneStatus === 'Done' ? 'Jira' : 'Jira · ' + v.doneStatus)
+      : v.activePack ? 'MainData · Active pack' : v.ordersMtd > 0 ? 'MainData · Orders MTD' : '';
+    return `<span class="badge seg-A">Done</span>${why ? ` <span class="dim">${escapeHtml(why)}</span>` : ''}`;
+  }
+  if(v.jiraStatus) return `<span class="badge seg-C">${escapeHtml(v.jiraStatus)}</span>`;
+  return `<span class="badge seg-Unknown">No Jira issue</span>`;
+}
+function leadListSection(vs){
+  if(vs.length && vs[0].cls === undefined){
+    return `<div class="section-note">The lead list needs fresh data — re-run <code>node update_dashboard.js</code>.</div>`;
+  }
+  const shown = vs.filter(v => leadsStatusFilter === 'all' || (leadsStatusFilter === 'done' ? v.done : !v.done))
+    .sort((a,b) => (b.done - a.done) || ((LEAD_CLASS_ORDER[a.cls] ?? 9) - (LEAD_CLASS_ORDER[b.cls] ?? 9)) || a.name.localeCompare(b.name));
+  const nDone = vs.filter(v => v.done).length;
+  return `
+    <div class="flex-between">
+      <div class="section-title" style="margin:0">Leads (${fmt(shown.length)})</div>
+      <div class="toggle-group">
+        <div class="toggle-btn ${leadsStatusFilter==='all'?'active':''}" data-leadstatus="all">All ${fmt(vs.length)}</div>
+        <div class="toggle-btn ${leadsStatusFilter==='done'?'active':''}" data-leadstatus="done">Done ${fmt(nDone)}</div>
+        <div class="toggle-btn ${leadsStatusFilter==='notdone'?'active':''}" data-leadstatus="notdone">Not Done ${fmt(vs.length - nDone)}</div>
+      </div>
+    </div>
+    <input class="search-box" id="leadsListSearch" placeholder="Filter by vendor name, ID, area or Jira key…">
+    <div class="table-wrap">
+      <table id="leadsListTable">
+        <thead><tr><th>Vendor</th><th>Area</th><th>Vendor Class</th><th>Tier</th><th>Status</th><th>Latest Jira Issue</th><th>Orders MTD</th></tr></thead>
+        <tbody>
+          ${shown.map(v => `<tr data-name="${escapeAttr([v.name, v.id, v.area, v.jiraKey].join(' ').toLowerCase())}">
+            <td>${escapeHtml(v.name)} <span class="dim">${escapeHtml(v.id)}</span></td>
+            <td>${escapeHtml(v.area || '—')}</td>
+            <td><span class="badge vc-${escapeAttr(v.cls)}">${escapeHtml(v.cls)}</span></td>
+            <td><span class="badge seg-${escapeAttr(v.tier==='—'?'Unknown':v.tier)}">${escapeHtml(v.tier)}</span></td>
+            <td>${leadStatusCell(v)}</td>
+            <td>${v.jiraKey ? `${escapeHtml(v.jiraStatus)} <span class="dim">${escapeHtml(v.jiraKey)}</span>` : '<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${v.ordersMtd ? fmt(v.ordersMtd) : '<span class="dim">0</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 
 function leadsMonthData(){
   const L = DATA.leads;
@@ -2292,7 +2339,10 @@ function renderLeads(){
     <span class="filter-chip ${filterOn?'':'active'}" data-leadcity="__all__">All</span>
     ${[...allCityCounts.entries()].sort((a,b) => b[1]-a[1]).map(([c,n]) => `<span class="filter-chip ${leadsCities.has(c)?'active':''}" data-leadcity="${escapeAttr(c)}">${escapeHtml(c)} <span style="opacity:.6">${fmt(n)}</span></span>`).join('')}
   </div>`;
-  if(filterOn) vs = vs.filter(v => leadsCities.has(v.city));
+  if(leadsDrillCity && !allCityCounts.has(leadsDrillCity)) leadsDrillCity = null;
+  const drillCity = leadsDrillCity;
+  if(drillCity) vs = vs.filter(v => v.city === drillCity);
+  else if(filterOn) vs = vs.filter(v => leadsCities.has(v.city));
 
   const done = vs.filter(v => v.done).length;
   const doneOrders = vs.filter(v => v.done).reduce((s,v) => s + (v.ordersMtd || 0), 0);
@@ -2310,18 +2360,18 @@ function renderLeads(){
   const js = L.jiraSource;
   const T = M.targets || null;
   // With a city filter, the target is the sum of the picked cities' targets.
-  const totalTarget = !T ? null : filterOn ? picked.reduce((s,c) => s + (T[c] || 0), 0) : T.__total__;
+  const totalTarget = !T ? null : drillCity ? (T[drillCity] ?? null) : filterOn ? picked.reduce((s,c) => s + (T[c] || 0), 0) : T.__total__;
   const achCell = (doneN, target) => target ? doneRateCell(doneN, target) : '<span class="dim">—</span>';
 
   return `
-    ${breadcrumb([M.label])}
+    ${drillCity ? breadcrumb([M.label, drillCity], ['ld-city-null']) : breadcrumb([M.label])}
     <div class="flex-between">
       <div class="section-note" style="margin:0">A lead from the <b>Lead Pool (${escapeHtml(monthName)})</b> sheet tab is <b>Done</b> if it has a Jira issue created in ${escapeHtml(monthName)} or later in Done, Content QC, Discount &amp; Coupon or Pack Freezing — <b>or</b> an active pack (Activity 1, not deleted) or M4O orders this month in MainData. Jira file: <b>${escapeHtml(js.file)}</b> (saved ${escapeHtml(js.modifiedAt.slice(0,16).replace('T',' '))} UTC).</div>
       ${L.months.length > 1 ? `<select id="leadsMonthSelect" style="padding:8px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px">
         ${[...L.months].reverse().map(k => `<option value="${escapeAttr(k)}" ${k===leadsMonth?'selected':''}>${escapeHtml(L.byMonth[k].label)}</option>`).join('')}
       </select>` : ''}
     </div>
-    ${cityBar}
+    ${drillCity ? '' : cityBar}
     <div class="stat-row">
       <div class="stat-card"><div class="label">Leads</div><div class="value">${fmt(vs.length)}</div></div>
       <div class="stat-card seg-a"><div class="label">Done</div><div class="value">${fmt(done)}</div><div class="sub">${fmt(viaJira)} via Jira · ${fmt(viaMainOnly)} via MainData only</div></div>
@@ -2331,11 +2381,11 @@ function renderLeads(){
       <div class="stat-card seg-b"><div class="label">Target Achieved (Done / Target)</div><div class="value">${totalTarget ? pct1(done/totalTarget*100) : '—'}</div></div>` : ''}
     </div>
     ${doneBefore || notInJira ? `<div class="section-note">${doneBefore ? `${fmt(doneBefore)} more lead${doneBefore===1?' has':'s have'} a Done-stage Jira issue from before ${escapeHtml(monthName)} only (and nothing live in MainData) — not counted as Done.` : ''}${doneBefore && notInJira ? ' ' : ''}${notInJira ? `${fmt(notInJira)} lead${notInJira===1?' has':'s have'} no Jira issue at all.` : ''}</div>` : ''}
-    <div class="table-wrap">
+    ${drillCity ? leadListSection(vs) : `<div class="table-wrap">
       <table>
         <thead><tr><th>City</th><th>Leads</th>${T?'<th>Vendor Target</th>':''}<th>Done</th>${hasOrders?'<th>Orders MTD (Done)</th>':''}<th>Conversion</th>${T?'<th>Target Achieved</th>':''}</tr></thead>
         <tbody>
-          ${cities.map(([city,c]) => `<tr>
+          ${cities.map(([city,c]) => `<tr class="clickable" data-action="ld-city" data-city="${escapeAttr(city)}">
             <td>${escapeHtml(city)}</td>
             <td style="font-family:var(--mono)">${fmt(c.leads)}</td>
             ${T ? `<td style="font-family:var(--mono)">${T[city] !== undefined ? fmt(T[city]) : '<span class="dim">—</span>'}</td>` : ''}
@@ -2355,7 +2405,7 @@ function renderLeads(){
           </tr>
         </tbody>
       </table>
-    </div>`;
+    </div>`}`;
 }
 
 function attachCoverageHistoryLeadsHandlers(){
@@ -2380,6 +2430,14 @@ function attachCoverageHistoryLeadsHandlers(){
       render();
     });
   });
+  document.querySelectorAll('[data-action="ld-city"]').forEach(el => {
+    el.addEventListener('click', () => { leadsDrillCity = el.dataset.city; leadsStatusFilter = 'all'; render(); });
+  });
+  document.querySelectorAll('[data-leadstatus]').forEach(el => {
+    el.addEventListener('click', () => { leadsStatusFilter = el.dataset.leadstatus; render(); });
+  });
+  const leadsListSearch = document.getElementById('leadsListSearch');
+  if(leadsListSearch) leadsListSearch.addEventListener('input', () => filterTable('leadsListTable', leadsListSearch.value));
   const monthSel = document.getElementById('leadsMonthSelect');
   if(monthSel) monthSel.addEventListener('change', () => { leadsMonth = monthSel.value; render(); });
 }
@@ -2475,6 +2533,7 @@ function attachHandlers(){
       if(module === 'imp'){ if(level==='city') { drill.impression.city=null; drill.impression.area=null; } if(level==='area'){ drill.impression.area=null; } }
       if(module === 'cpo'){ if(level==='city') { drill.cpoBudget.city=null; drill.cpoBudget.area=null; } if(level==='area'){ drill.cpoBudget.area=null; } }
       if(module === 'ch'){ if(level==='city') { drill.coverageHistory.city=null; drill.coverageHistory.area=null; } if(level==='area'){ drill.coverageHistory.area=null; } }
+      if(module === 'ld'){ if(level==='city') { leadsDrillCity = null; } }
       if(module === 'dl'){
         if(level==='city') { drill.delivery.city=null; drill.delivery.area=null; drill.delivery.vendorId=null; }
         if(level==='area'){ drill.delivery.area=null; drill.delivery.vendorId=null; }

@@ -249,18 +249,26 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], 
 
   const doneIssuesByVendor = new Map();
   const vendorsInJira = new Set();
+  const issueNum = (k) => toNum(String(k || '').replace(/^\D+/, ''), 0);
+  const latestIssueByVendor = new Map(); // newest by Created, then issue number
   const rows = daily && daily.rows ? daily.rows : [];
   for (const r of rows) {
     const vid = clean(r.vendorid);
     if (!vid || vid === '-') continue;
     vendorsInJira.add(vid);
-    if (!DONE_STAGE_RE.test(clean(r.currentstatus))) continue;
+    const issue = { key: clean(r.issuekey) || null, status: clean(r.currentstatus) || 'Unknown', created: toNum(r.created, 0) };
+    const prev = latestIssueByVendor.get(vid);
+    if (!prev || issue.created > prev.created || (issue.created === prev.created && issueNum(issue.key) > issueNum(prev.key))) {
+      latestIssueByVendor.set(vid, issue);
+    }
+    if (!DONE_STAGE_RE.test(issue.status)) continue;
     if (!doneIssuesByVendor.has(vid)) doneIssuesByVendor.set(vid, []);
-    doneIssuesByVendor.get(vid).push({ key: clean(r.issuekey) || null, created: toNum(r.created, 0) });
+    doneIssuesByVendor.get(vid).push(issue);
   }
 
   // MainData only reflects the current state, so it's the same for every month.
   const liveInMainData = new Set();
+  const activeInMainData = new Set();
   // vendor_m41_Orders_MTD is a vendor-level figure repeated on every pack
   // row, so it's the max per vendor, never a sum across packs.
   const ordersMtdByVendor = new Map();
@@ -270,6 +278,7 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], 
     const active = toNum(r.Activity) === 1 && toNum(r.Deleted) === 0;
     const orders = toNum(r.vendor_m41_Orders_MTD);
     if (orders > (ordersMtdByVendor.get(vid) || 0)) ordersMtdByVendor.set(vid, orders);
+    if (active) activeInMainData.add(vid);
     if (active || orders > 0) liveInMainData.add(vid);
   }
 
@@ -288,10 +297,19 @@ function buildLeadsModule({ leadPools, daily, mainRows = [], overviewRows = [], 
       const doneIn = done.filter((i) => i.created >= month.start).sort((a, b) => a.created - b.created);
       const jiraDone = doneIn.length > 0;
       const mainDone = liveInMainData.has(vid);
+      const last = latestIssueByVendor.get(vid) || null;
       vendors.push({
         id: vid,
         name: clean(r.Title),
         city: clean(r.City) || '—',
+        area: clean(r.MarketingAreaName),
+        cls: clean(r.VendorClass) || '—',
+        tier: clean(r.VendorTier) || '—',
+        // Latest Jira issue (any status) — what the list shows for leads not Done.
+        jiraStatus: last ? last.status : null,
+        jiraKey: last ? last.key : null,
+        doneStatus: jiraDone ? doneIn[0].status : null,
+        activePack: activeInMainData.has(vid) ? 1 : 0,
         inJira: vendorsInJira.has(vid) ? 1 : 0,
         done: jiraDone || mainDone ? 1 : 0,
         jiraDone: jiraDone ? 1 : 0,
