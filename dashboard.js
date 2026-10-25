@@ -1435,7 +1435,14 @@ function renderOrderShare(){
     <div class="section-note">Three definitions, narrowest to widest denominator — "Vendor Engagement" is M4O orders ÷ platform orders of only the vendors that carry Meal4One packs; "Order Share (M4O Cities)" is M4O orders ÷ every Restaurant order in the cities M4O operates in (from "All Order"); "Order Share (All Cities)" is the same but across every city on Snapp Food, M4O or not — overall only, since dividing one city by a project-wide total wouldn't mean anything.</div>
     <div class="stat-row">
       <div class="stat-card"><div class="label">M4O Orders</div><div class="value">${fmt(overall.m41Orders)}</div></div>
-      <div class="stat-card"><div class="label">Platform Orders (M4O vendors only)</div><div class="value">${fmt(overall.platformOrders)}</div></div>
+      ${(() => {
+        // Every Restaurant order on Snapp Food, all cities ("All Order" sheet) —
+        // the denominator of Order Share (All Cities). Absent under a Vendor Type filter.
+        const allPlat = overall.allOrders || null;
+        return allPlat
+          ? `<div class="stat-card"><div class="label">Total Platform Orders</div><div class="value">${fmt(allPlat)}</div><div class="sub">All Restaurant orders on Snapp Food, every city</div></div>`
+          : `<div class="stat-card"><div class="label">Platform Orders (M4O vendors only)</div><div class="value">${fmt(overall.platformOrders)}</div></div>`;
+      })()}
       <div class="stat-card accent"><div class="label">Vendor Engagement</div><div class="value">${shareToPct(overall.share)}</div><div class="sub">M4O orders ÷ all orders placed with M4O vendors</div></div>
       ${overall.m4oCitiesShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value">${overall.m4oCitiesShare!==null?shareToPct(overall.m4oCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders in M4O's own cities</div></div>` : ''}
       ${overall.allCitiesShare !== undefined ? `<div class="stat-card purple"><div class="label">Order Share (All Cities)</div><div class="value">${overall.allCitiesShare!==null?shareToPct(overall.allCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders on Snapp Food, every city</div></div>` : ''}
