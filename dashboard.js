@@ -257,23 +257,31 @@ document.getElementById('tabs').addEventListener('click', e => {
 /* ============================================================
    RENDER DISPATCH
    ============================================================ */
+const PANEL_RENDERERS = {
+  overview: () => renderOverview(), vendorCoverage: () => renderVendorCoverage(), packDistribution: () => renderPackDistribution(),
+  impression: () => renderImpression(), rating: () => renderRating(), orderShare: () => renderOrderShare(),
+  kitchen: () => renderKitchen(), cpoBudget: () => renderCpoBudget(), coverageModel: () => renderCoverageModel(),
+  delivery: () => renderDelivery(), coverageHistory: () => renderCoverageHistory(), leads: () => renderLeads(),
+};
+// A bug or an unexpected data shape in one tab shows an error box naming the
+// problem instead of a blank tab (or freezing every other tab with it).
+function renderError(what, err){
+  console.error(what, err);
+  return `<div class="empty-state" style="text-align:left; border:1px solid var(--deal-weak); border-radius:var(--radius)">
+    <b style="color:var(--deal-weak)">This ${escapeHtml(what)} could not be shown.</b><br><br>
+    Error: <code>${escapeHtml(err && err.message || String(err))}</code><br>
+    <span class="dim">Tab: ${escapeHtml(currentPanel)} · data generated ${escapeHtml(DATA && DATA.generatedAt || '?')}. Send this text to whoever maintains the dashboard.</span>
+  </div>`;
+}
 function render(){
   if(!DATA) return;
   filterBarVisible();
   const root = document.getElementById('root');
-  if(currentPanel === 'overview') root.innerHTML = renderOverview();
-  else if(currentPanel === 'vendorCoverage') root.innerHTML = renderVendorCoverage();
-  else if(currentPanel === 'packDistribution') root.innerHTML = renderPackDistribution();
-  else if(currentPanel === 'impression') root.innerHTML = renderImpression();
-  else if(currentPanel === 'rating') root.innerHTML = renderRating();
-  else if(currentPanel === 'orderShare') root.innerHTML = renderOrderShare();
-  else if(currentPanel === 'kitchen') root.innerHTML = renderKitchen();
-  else if(currentPanel === 'cpoBudget') root.innerHTML = renderCpoBudget();
-  else if(currentPanel === 'coverageModel') root.innerHTML = renderCoverageModel();
-  else if(currentPanel === 'delivery') root.innerHTML = renderDelivery();
-  else if(currentPanel === 'coverageHistory') root.innerHTML = renderCoverageHistory();
-  else if(currentPanel === 'leads') root.innerHTML = renderLeads();
-  attachHandlers();
+  const fn = PANEL_RENDERERS[currentPanel];
+  try { root.innerHTML = fn ? fn() : ''; }
+  catch(err){ root.innerHTML = renderError('tab', err); return; }
+  try { attachHandlers(); }
+  catch(err){ root.insertAdjacentHTML('beforeend', renderError('tab\'s charts or controls', err)); }
 }
 
 /* ============================================================
@@ -1446,11 +1454,11 @@ function renderOrderShare(){
       <div class="stat-card accent"><div class="label">Vendor Engagement</div><div class="value">${shareToPct(overall.share)}</div><div class="sub">M4O orders ÷ all orders placed with M4O vendors</div></div>
       ${overall.m4oCitiesShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value">${overall.m4oCitiesShare!==null?shareToPct(overall.m4oCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders in M4O's own cities</div></div>` : ''}
       ${overall.allCitiesShare !== undefined ? `<div class="stat-card purple"><div class="label">Order Share (All Cities)</div><div class="value">${overall.allCitiesShare!==null?shareToPct(overall.allCitiesShare):'<span class="dim">—</span>'}</div><div class="sub">M4O orders ÷ all Restaurant orders on Snapp Food, every city</div></div>` : ''}
-      <div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value">${shareToPct(tc.rate)}</div><div class="sub">${tc.numerator} / ${tc.denominator} TopCritical vendors ordered M4O</div></div>
+      ${tc ? `<div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value">${shareToPct(tc.rate)}</div><div class="sub">${tc.numerator} / ${tc.denominator} TopCritical vendors ordered M4O</div></div>` : ''}
       ${overall.ordersPerOrderedVendor !== undefined ? `<div class="stat-card"><div class="label">Orders / Ordered Vendor (O/V)</div><div class="value small">${overall.ordersPerOrderedVendor.toFixed(1)}</div><div class="sub">${fmt(overall.orderedVendorCount)} vendors placed at least 1 order</div></div>` : ''}
     </div>
     ${overall.allCitiesShare === undefined ? '<div class="section-note">"Order Share (M4O/All Cities)" and O/V are only available for the unfiltered (All) Vendor Type view.</div>' : ''}
-    ${tc.bySegment ? `<div class="section-note">Top Critical breakdown: ${fmt(tc.bySegment['Highly Engaged']||0)} Highly Engaged, ${fmt(tc.bySegment['Moderate Engaged']||0)} Moderate, ${fmt(tc.bySegment['Low Engaged']||0)} Low, ${fmt(tc.bySegment['No Order']||0)} No Order.</div>` : ''}
+    ${tc && tc.bySegment ? `<div class="section-note">Top Critical breakdown: ${fmt(tc.bySegment['Highly Engaged']||0)} Highly Engaged, ${fmt(tc.bySegment['Moderate Engaged']||0)} Moderate, ${fmt(tc.bySegment['Low Engaged']||0)} Low, ${fmt(tc.bySegment['No Order']||0)} No Order.</div>` : ''}
     <div class="section-title">Ordered vs. Unordered</div>
     <div class="stat-row">
       <div class="stat-card seg-a"><div class="label">Vendors Ordered</div><div class="value small">${fmt(orderedV.ordered)}<span class="pct-tag">${pct1(orderedV.ordered_pct)}</span></div></div>
