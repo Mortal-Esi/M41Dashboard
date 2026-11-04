@@ -328,3 +328,13 @@ Only **Git** and **Node.js** are needed (no Python). On Windows 10/11:
 
 If `password.local.js` is lost, every user needs a new password:
 `node make-users.js add …` again, then refresh.
+
+### Optional: Python for analysis work
+
+The dashboard never uses Python. For your own analysis, `setup-python.bat`
+installs Python 3.12 (via winget) and the libraries in
+`requirements-python.txt`: pandas, numpy, openpyxl, xlsxwriter, pyxlsb,
+matplotlib, seaborn, plotly, jupyterlab, gspread, gspread-dataframe,
+google-auth, google-api-python-client, requests, tqdm. Run it twice on a
+machine without Python (once to install Python, once more in a new window
+for the libraries). Notebooks: `py -m jupyter lab`.

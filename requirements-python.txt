@@ -1,0 +1,28 @@
+# Python libraries for analysis work next to the dashboard.
+# The dashboard itself does NOT need Python — only Node.js.
+# Install: setup-python.bat  (or: py -m pip install -r requirements-python.txt)
+
+# Data + Excel
+pandas
+numpy
+openpyxl
+xlsxwriter
+pyxlsb
+
+# Charts
+matplotlib
+seaborn
+plotly
+
+# Notebooks
+jupyterlab
+
+# Google Sheets / Drive (same service-account.json as the dashboard)
+gspread
+gspread-dataframe
+google-auth
+google-api-python-client
+
+# General
+requests
+tqdm
