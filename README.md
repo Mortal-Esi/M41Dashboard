@@ -311,6 +311,18 @@ labels); city and area names stay as they appear in the source data.
 
 ## Moving to a new computer
 
+**One command (Windows):** open a normal PowerShell window and run
+
+```
+[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.ps1 | iex
+```
+
+It installs Git, Node.js and Python (one administrator prompt — only the
+installs run as admin), clones the code into `%USERPROFILE%\M41Dashboard`,
+runs `npm install` and the Python libraries, asks for your git name/email,
+and opens the folder so you can copy in the three private files below.
+Re-running it is safe. The manual steps follow.
+
 Only **Git** and **Node.js** are needed (no Python). On Windows 10/11:
 
 1. Install both (Command Prompt): `winget install --id Git.Git -e` and
