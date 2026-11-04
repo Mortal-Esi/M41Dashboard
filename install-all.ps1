@@ -3,7 +3,7 @@
 # Run in a normal (NOT administrator) PowerShell window:
 #   [Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.ps1 | iex
 #
-# Only the program installs (Git, Node.js, Python) run as administrator - one
+# Only the program installs (Git, Node.js, Python, VS Code) run as administrator - one
 # password prompt. Everything else (code, packages, libraries, git name) runs
 # as you, so it lands in YOUR user profile, not the admin account's.
 # Safe to run again: anything already installed is skipped.
@@ -26,12 +26,13 @@ Write-Host '  Meal4One dashboard - new PC setup'
 Write-Host '============================================'
 
 # ---------- 1. Programs (administrator, one prompt) ----------
-Step '1/6  Git, Node.js, Python'
+Step '1/7  Git, Node.js, Python, VS Code'
 RefreshPath
 $need = @()
 if (Has git)  { Ok "Git already installed" }     else { $need += 'git' }
 if (Has node) { Ok "Node.js already installed" } else { $need += 'node' }
 if (Has py)   { Ok "Python already installed" }  else { $need += 'python' }
+if (Has code) { Ok "VS Code already installed" } else { $need += 'vscode' }
 
 if ($need.Count -gt 0) {
   if (-not (Has winget)) {
@@ -55,6 +56,7 @@ foreach ($n in $args) {
   switch ($n) {
     'git'    { & $wg install --id Git.Git @common --silent }
     'node'   { & $wg install --id OpenJS.NodeJS.LTS @common --silent }
+    'vscode' { & $wg install --id Microsoft.VisualStudioCode @common --silent }
     'python' { & $wg install --id Python.Python.3.12 @common --override '/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1' }
   }
   if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "  $n exit code $LASTEXITCODE" -ForegroundColor Yellow }
@@ -72,10 +74,12 @@ if ($failed) { Read-Host 'Something did not install (see above). Press Enter to 
   foreach ($c in @{ git = 'Git'; node = 'Node.js'; py = 'Python' }.GetEnumerator()) {
     if (Has $c.Key) { Ok "$($c.Value) ready" } else { Fail "$($c.Value) did not install. Close this window, open a new one and run the command again." }
   }
+  # VS Code is optional - the dashboard works without it.
+  if (Has code) { Ok 'VS Code ready' } else { Warn 'VS Code did not install - optional, get it from https://code.visualstudio.com' }
 }
 
 # ---------- 2. Code ----------
-Step "2/6  Dashboard code -> $Dir"
+Step "2/7  Dashboard code -> $Dir"
 if (Test-Path (Join-Path $Dir '.git')) {
   git -C $Dir pull --ff-only origin main
   if ($LASTEXITCODE -ne 0) { Warn "git pull failed - keeping the existing copy (run fix-git-conflict.bat later)." } else { Ok 'Updated' }
@@ -87,21 +91,29 @@ if (Test-Path (Join-Path $Dir '.git')) {
 Set-Location $Dir
 
 # ---------- 3. Node packages ----------
-Step '3/6  Dashboard packages (npm install)'
+Step '3/7  Dashboard packages (npm install)'
 # npm.cmd, not npm: a restricted ExecutionPolicy blocks the npm.ps1 shim.
 npm.cmd install --no-audit --no-fund
 if ($LASTEXITCODE -ne 0) { Fail 'npm install failed. Check the internet connection and run this again.' }
 Ok 'googleapis, xlsx, crypto-js installed'
 
 # ---------- 4. Python libraries ----------
-Step '4/6  Python libraries (a few minutes)'
+Step '4/7  Python libraries (a few minutes)'
 py -m pip install --user --upgrade pip --quiet
 py -m pip install --user -r requirements-python.txt
 if ($LASTEXITCODE -ne 0) { Fail 'Some Python libraries did not install - the message above says which.' }
 py -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)"
 
-# ---------- 5. Git identity ----------
-Step '5/6  Git name/email for "Update dashboard data" commits'
+# ---------- 5. VS Code extensions ----------
+Step '5/7  VS Code extensions (Python, Jupyter)'
+if (Has code) {
+  code.cmd --install-extension ms-python.python --force *> $null
+  code.cmd --install-extension ms-toolsai.jupyter --force *> $null
+  Ok 'Python and Jupyter extensions installed'
+} else { Warn 'Skipped - VS Code not found' }
+
+# ---------- 6. Git identity ----------
+Step '6/7  Git name/email for "Update dashboard data" commits'
 $gitName = git config --global user.name
 if (-not $gitName) {
   $gitName = Read-Host '   Your name'
@@ -110,8 +122,8 @@ if (-not $gitName) {
 }
 Ok "Commits as: $gitName"
 
-# ---------- 6. Private files ----------
-Step '6/6  Private files from the old computer'
+# ---------- 7. Private files ----------
+Step '7/7  Private files from the old computer'
 $missing = @('service-account.json', 'config.local.js', 'password.local.js') | Where-Object { -not (Test-Path (Join-Path $Dir $_)) }
 if ($missing) {
   foreach ($m in $missing) { Warn "missing: $m" }

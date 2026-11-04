@@ -324,7 +324,7 @@ Or, where PowerShell is allowed, open a normal PowerShell window and run
 [Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.ps1 | iex
 ```
 
-It installs Git, Node.js and Python (one administrator prompt — only the
+It installs Git, Node.js, Python and VS Code with its Python/Jupyter extensions (one administrator prompt — only the
 installs run as admin), clones the code into `%USERPROFILE%\M41Dashboard`,
 runs `npm install` and the Python libraries, asks for your git name/email,
 and opens the folder so you can copy in the three private files below.

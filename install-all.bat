@@ -1,8 +1,9 @@
 @echo off
 rem install-all.bat - sets up a new Windows PC for the Meal4One dashboard,
+rem (Git, Node.js, Python 3.12, VS Code + the dashboard and its libraries)
 rem using only Command Prompt (no PowerShell). Run it in a normal cmd window:
 rem   curl -L -o "%TEMP%\m41-install.bat" https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.bat && "%TEMP%\m41-install.bat"
-rem Only the program installs (Git, Node.js, Python) run as administrator, in
+rem Only the program installs (Git, Node.js, Python, VS Code) run as administrator, in
 rem one elevated window; everything else runs as you. Safe to run again.
 
 setlocal EnableExtensions EnableDelayedExpansion
@@ -19,12 +20,13 @@ echo   Meal4One dashboard - new PC setup
 echo ============================================
 
 echo.
-echo == 1/6  Git, Node.js, Python
+echo == 1/7  Git, Node.js, Python, VS Code
 call :refreshpath
 set "NEED="
 where git  >nul 2>nul && (echo    [OK] Git already installed)    || set "NEED=!NEED! git"
 where node >nul 2>nul && (echo    [OK] Node.js already installed) || set "NEED=!NEED! node"
 where py   >nul 2>nul && (echo    [OK] Python already installed)  || set "NEED=!NEED! python"
+where code >nul 2>nul && (echo    [OK] VS Code already installed) || set "NEED=!NEED! vscode"
 if defined NEED (
     call :install_programs
     call :refreshpath
@@ -34,9 +36,11 @@ where git  >nul 2>nul || set "STILL=!STILL! Git"
 where node >nul 2>nul || set "STILL=!STILL! Node.js"
 where py   >nul 2>nul || set "STILL=!STILL! Python"
 if defined STILL goto :manual_install
+rem VS Code is optional - the dashboard works without it.
+where code >nul 2>nul || echo    [WARN] VS Code did not install - optional, get it from https://code.visualstudio.com
 
 echo.
-echo == 2/6  Dashboard code ^> %DIR%
+echo == 2/7  Dashboard code ^> %DIR%
 if exist "%DIR%\.git" (
     git -C "%DIR%" pull --ff-only origin main
     if errorlevel 1 (echo    [WARN] git pull failed - keeping the existing copy) else (echo    [OK] Updated)
@@ -48,20 +52,28 @@ if exist "%DIR%\.git" (
 cd /d "%DIR%"
 
 echo.
-echo == 3/6  Dashboard packages (npm install)
+echo == 3/7  Dashboard packages (npm install)
 call npm install --no-audit --no-fund
 if errorlevel 1 (set "ERR=npm install failed. Check the internet connection and run this again." & goto :fail)
 echo    [OK] googleapis, xlsx, crypto-js installed
 
 echo.
-echo == 4/6  Python libraries (a few minutes)
+echo == 4/7  Python libraries (a few minutes)
 py -m pip install --user --upgrade pip --quiet
 py -m pip install --user -r requirements-python.txt
 if errorlevel 1 (set "ERR=Some Python libraries did not install - the message above says which." & goto :fail)
 py -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)"
 
 echo.
-echo == 5/6  Git name/email for the "Update dashboard data" commits
+echo == 5/7  VS Code extensions (Python, Jupyter)
+where code >nul 2>nul && (
+    call code --install-extension ms-python.python --force >nul 2>nul
+    call code --install-extension ms-toolsai.jupyter --force >nul 2>nul
+    echo    [OK] Python and Jupyter extensions installed
+) || echo    [WARN] Skipped - VS Code not found
+
+echo.
+echo == 6/7  Git name/email for the "Update dashboard data" commits
 set "GITNAME="
 for /f "delims=" %%n in ('git config --global user.name 2^>nul') do set "GITNAME=%%n"
 if not defined GITNAME (
@@ -73,7 +85,7 @@ if not defined GITNAME (
 echo    [OK] Commits as: !GITNAME!
 
 echo.
-echo == 6/6  Private files from the old computer
+echo == 7/7  Private files from the old computer
 set "MISSING="
 for %%F in (service-account.json config.local.js password.local.js) do (
     if exist "%DIR%\%%F" (echo    [OK] %%F) else (echo    [WARN]  missing: %%F & set "MISSING=1")
@@ -141,6 +153,7 @@ exit /b 0
 :winget_one
 if /i "%~2"=="git"    "%~1" install --id Git.Git -e --silent --scope machine --accept-package-agreements --accept-source-agreements
 if /i "%~2"=="node"   "%~1" install --id OpenJS.NodeJS.LTS -e --silent --scope machine --accept-package-agreements --accept-source-agreements
+if /i "%~2"=="vscode" "%~1" install --id Microsoft.VisualStudioCode -e --silent --scope machine --accept-package-agreements --accept-source-agreements
 if /i "%~2"=="python" "%~1" install --id Python.Python.3.12 -e --scope machine --accept-package-agreements --accept-source-agreements --override "/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1"
 exit /b 0
 
@@ -186,7 +199,8 @@ echo    Install them from these pages ^(each asks for the admin password^), then
 echo      Git      https://git-scm.com/download/win
 echo      Node.js  https://nodejs.org   ^(the LTS version^)
 echo      Python   https://www.python.org/downloads/   ^(tick "Add python.exe to PATH"^)
-echo    If the company blocks installing programs, ask IT to install these three.
+echo      VS Code  https://code.visualstudio.com   ^(optional^)
+echo    If the company blocks installing programs, ask IT to install these.
 pause
 exit /b 1
 
