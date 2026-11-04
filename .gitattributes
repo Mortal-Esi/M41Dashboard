@@ -1,0 +1,3 @@
+# Served raw to Windows cmd: keep CRLF exactly as committed (batch labels
+# and goto can misbehave with LF-only line endings).
+install-all.bat -text

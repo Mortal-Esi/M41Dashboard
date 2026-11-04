@@ -311,7 +311,14 @@ labels); city and area names stay as they appear in the source data.
 
 ## Moving to a new computer
 
-**One command (Windows):** open a normal PowerShell window and run
+**One command (Windows, Command Prompt — works where PowerShell is blocked):**
+open a normal `cmd` window and run
+
+```
+curl -L -o "%TEMP%\m41-install.bat" https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.bat && "%TEMP%\m41-install.bat"
+```
+
+Or, where PowerShell is allowed, open a normal PowerShell window and run
 
 ```
 [Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.ps1 | iex
