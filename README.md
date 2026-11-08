@@ -308,3 +308,52 @@ labels); city and area names stay as they appear in the source data.
 - **Coverage History** reads `COVERAGE_HISTORY_SPREADSHEET_ID` (one tab per day, named `YYYY-MM-DD`, same columns as CoverageResult plus `TopAreas`). The last 60 non-empty days are kept. City and All Cities figures are user-weighted sums of the area rows; "Top Areas" = rows with `TopAreas = 1`.
 - **Lead Tracking** reads every `Lead Pool (<Month>)` tab of `LEADS_SPREADSHEET_ID` and shows, overall and per city, how many leads are **Done**. A lead is Done if the vendor has a Jira issue created on/after that month's 1st in Done, Content QC, Discount & Coupon or Pack Freezing & Upload to Carousel, **or** MainData has an active pack for it (Activity 1, Deleted 0) or M4O orders this month (`vendor_m41_Orders_MTD` > 0). The `Overview` tab's `Total Vendor Target` (per city, and its `Total` row) is shown next to it, with Target Achieved = Done ÷ Target alongside Conversion = Done ÷ Leads; it applies to the latest month only.
 - **Jira file**: put the Jira export next to `update_dashboard.js`. Files named `Daily*` are tried first (newest first); otherwise any `.xlsx/.xls/.csv` in the folder with `Vendor ID` and `Current Status` columns is used, so the name doesn't matter. If none is usable, the tab shows the exact reason (e.g. file locked by Excel). It is gitignored. If the `xlsx` package is missing, the script runs `npm install` once by itself.
+
+## Moving to a new computer
+
+**One command (Windows, Command Prompt — works where PowerShell is blocked):**
+open a normal `cmd` window and run
+
+```
+curl -L -o "%TEMP%\m41-install.bat" https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.bat && "%TEMP%\m41-install.bat"
+```
+
+Or, where PowerShell is allowed, open a normal PowerShell window and run
+
+```
+[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.ps1 | iex
+```
+
+It installs Git, Node.js, Python and VS Code with its Python/Jupyter extensions (one administrator prompt — only the
+installs run as admin), clones the code into `%USERPROFILE%\M41Dashboard`,
+runs `npm install` and the Python libraries, asks for your git name/email,
+and opens the folder so you can copy in the three private files below.
+Re-running it is safe. The manual steps follow.
+
+Only **Git** and **Node.js** are needed (no Python). On Windows 10/11:
+
+1. Install both (Command Prompt): `winget install --id Git.Git -e` and
+   `winget install --id OpenJS.NodeJS.LTS -e`, then open a new window.
+2. Get the code: `git clone https://github.com/Mortal-Esi/M41Dashboard.git`
+3. Copy these files from the old computer's dashboard folder into the new
+   one — by USB stick or similar, **never** email, chat or GitHub (they're
+   gitignored on purpose):
+   `service-account.json`, `config.local.js`, `password.local.js`
+   (and the latest `Daily*.xlsx` Jira export).
+4. Run `setup-new-pc.bat`: it checks Git/Node, runs `npm install`, checks
+   the three files, sets your git name/email and lists the dashboard users.
+5. Run `refresh-dashboard.bat`. The first push asks you to sign in to
+   GitHub once.
+
+If `password.local.js` is lost, every user needs a new password:
+`node make-users.js add …` again, then refresh.
+
+### Optional: Python for analysis work
+
+The dashboard never uses Python. For your own analysis, `setup-python.bat`
+installs Python 3.12 (via winget) and the libraries in
+`requirements-python.txt`: pandas, numpy, openpyxl, xlsxwriter, pyxlsb,
+matplotlib, seaborn, plotly, jupyterlab, gspread, gspread-dataframe,
+google-auth, google-api-python-client, requests, tqdm. Run it twice on a
+machine without Python (once to install Python, once more in a new window
+for the libraries). Notebooks: `py -m jupyter lab`.
