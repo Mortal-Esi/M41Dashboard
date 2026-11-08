@@ -57,7 +57,7 @@ foreach ($n in $args) {
     'git'    { & $wg install --id Git.Git @common --silent }
     'node'   { & $wg install --id OpenJS.NodeJS.LTS @common --silent }
     'vscode' { & $wg install --id Microsoft.VisualStudioCode @common --silent }
-    'python' { & $wg install --id Python.Python.3.12 @common --override '/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1' }
+    'python' { & $wg install --id Python.Python.3.13 @common --override '/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1' }
   }
   if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "  $n exit code $LASTEXITCODE" -ForegroundColor Yellow }
 }

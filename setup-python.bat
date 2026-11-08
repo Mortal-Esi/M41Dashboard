@@ -11,8 +11,8 @@ echo.
 echo [1/3] Checking Python...
 where py >nul 2>nul
 if errorlevel 1 (
-    echo   Python not found - installing Python 3.12 with winget...
-    winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+    echo   Python not found - installing Python 3.13 with winget...
+    winget install --id Python.Python.3.13 -e --accept-package-agreements --accept-source-agreements
     if errorlevel 1 (
         echo   [FAILED] Could not install Python. Install it from python.org ^(tick "Add python.exe to PATH"^),
         echo            then run this file again.

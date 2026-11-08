@@ -351,7 +351,7 @@ If `password.local.js` is lost, every user needs a new password:
 ### Optional: Python for analysis work
 
 The dashboard never uses Python. For your own analysis, `setup-python.bat`
-installs Python 3.12 (via winget) and the libraries in
+installs Python 3.13 (via winget) and the libraries in
 `requirements-python.txt`: pandas, numpy, openpyxl, xlsxwriter, pyxlsb,
 matplotlib, seaborn, plotly, jupyterlab, gspread, gspread-dataframe,
 google-auth, google-api-python-client, requests, tqdm. Run it twice on a

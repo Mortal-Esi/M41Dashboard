@@ -1,6 +1,6 @@
 @echo off
 rem install-all.bat - sets up a new Windows PC for the Meal4One dashboard,
-rem (Git, Node.js, Python 3.12, VS Code + the dashboard and its libraries)
+rem (Git, Node.js, Python 3.13, VS Code + the dashboard and its libraries)
 rem using only Command Prompt (no PowerShell). Run it in a normal cmd window:
 rem   curl -L -o "%TEMP%\m41-install.bat" https://raw.githubusercontent.com/Mortal-Esi/M41Dashboard/main/install-all.bat && "%TEMP%\m41-install.bat"
 rem Only the program installs (Git, Node.js, Python, VS Code) run as administrator, in
@@ -154,7 +154,7 @@ exit /b 0
 if /i "%~2"=="git"    "%~1" install --id Git.Git -e --silent --scope machine --accept-package-agreements --accept-source-agreements
 if /i "%~2"=="node"   "%~1" install --id OpenJS.NodeJS.LTS -e --silent --scope machine --accept-package-agreements --accept-source-agreements
 if /i "%~2"=="vscode" "%~1" install --id Microsoft.VisualStudioCode -e --silent --scope machine --accept-package-agreements --accept-source-agreements
-if /i "%~2"=="python" "%~1" install --id Python.Python.3.12 -e --scope machine --accept-package-agreements --accept-source-agreements --override "/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1"
+if /i "%~2"=="python" "%~1" install --id Python.Python.3.13 -e --scope machine --accept-package-agreements --accept-source-agreements --override "/quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1"
 exit /b 0
 
 rem ---------------------------------------------------------------
