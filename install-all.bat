@@ -59,10 +59,27 @@ echo    [OK] googleapis, xlsx, crypto-js installed
 
 echo.
 echo == 4/7  Python libraries (a few minutes)
-py -m pip install --user --upgrade pip --quiet
-py -m pip install --user -r requirements-python.txt
-if errorlevel 1 (set "ERR=Some Python libraries did not install - the message above says which." & goto :fail)
-py -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)"
+rem Use a stable Python: the newest installed one can be a pre-release (e.g. 3.15)
+rem that pandas and numpy don't publish packages for yet.
+rem Python is optional - the dashboard works without it, so problems here only warn.
+set "PY="
+for %%V in (3.13 3.14 3.12) do if not defined PY py -%%V -c "import sys" >nul 2>nul && set "PY=py -%%V"
+if not defined PY goto :no_stable_python
+echo    Using Python: !PY!
+!PY! -m pip install --user --upgrade pip --quiet --no-warn-script-location
+!PY! -m pip install --user --no-warn-script-location -r requirements-python.txt
+if errorlevel 1 (
+    echo    [WARN] Some Python libraries did not install - see the message above. The dashboard does not need them.
+) else (
+    !PY! -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)"
+)
+goto :after_python
+:no_stable_python
+echo    [WARN] No stable Python ^(3.12 - 3.14^) found. Installed versions:
+py --list
+echo    Python libraries skipped - the dashboard does not need them.
+echo    For analysis work, ask ICT for "Python 3.13 - Windows installer (64-bit)", then run this again.
+:after_python
 
 echo.
 echo == 5/7  VS Code extensions (Python, Jupyter)
@@ -105,7 +122,7 @@ if defined MISSING (
 echo.
 echo ============================================
 echo   Done. Dashboard folder: %DIR%
-echo   Notebooks: py -m jupyter lab
+echo   Notebooks: py -3.13 -m jupyter lab
 echo ============================================
 pause
 exit /b 0

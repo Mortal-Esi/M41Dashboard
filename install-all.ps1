@@ -99,10 +99,21 @@ Ok 'googleapis, xlsx, crypto-js installed'
 
 # ---------- 4. Python libraries ----------
 Step '4/7  Python libraries (a few minutes)'
-py -m pip install --user --upgrade pip --quiet
-py -m pip install --user -r requirements-python.txt
-if ($LASTEXITCODE -ne 0) { Fail 'Some Python libraries did not install - the message above says which.' }
-py -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)"
+# Use a stable Python: the newest installed one can be a pre-release (e.g. 3.15)
+# that pandas and numpy don't publish packages for yet. Python is optional -
+# the dashboard works without it - so problems here only warn.
+$pyVer = $null
+foreach ($v in '3.13', '3.14', '3.12') { py "-$v" -c "import sys" *> $null; if ($LASTEXITCODE -eq 0) { $pyVer = "-$v"; break } }
+if ($pyVer) {
+  Write-Host "   Using Python: py $pyVer"
+  py $pyVer -m pip install --user --upgrade pip --quiet --no-warn-script-location
+  py $pyVer -m pip install --user --no-warn-script-location -r requirements-python.txt
+  if ($LASTEXITCODE -ne 0) { Warn 'Some Python libraries did not install - see the message above. The dashboard does not need them.' } else { py $pyVer -c "import pandas, numpy, openpyxl, matplotlib, gspread; print('   [OK] pandas', pandas.__version__, '- numpy', numpy.__version__)" }
+} else {
+  Warn 'No stable Python (3.12 - 3.14) found. Installed versions:'
+  py --list
+  Warn 'Python libraries skipped - the dashboard does not need them. For analysis, install Python 3.13 64-bit and run this again.'
+}
 
 # ---------- 5. VS Code extensions ----------
 Step '5/7  VS Code extensions (Python, Jupyter)'
@@ -138,6 +149,6 @@ if ($missing) {
 Write-Host "`n============================================" -ForegroundColor Green
 Write-Host "  Done. Dashboard folder: $Dir" -ForegroundColor Green
 if ($missing) { Write-Host '  After copying the private files: run refresh-dashboard.bat' -ForegroundColor Green } else { Write-Host '  Next: run refresh-dashboard.bat (first push asks you to sign in to GitHub once)' -ForegroundColor Green }
-Write-Host '  Notebooks: py -m jupyter lab' -ForegroundColor Green
+Write-Host '  Notebooks: py -3.13 -m jupyter lab' -ForegroundColor Green
 Write-Host '============================================' -ForegroundColor Green
 Read-Host "`nPress Enter to close"
