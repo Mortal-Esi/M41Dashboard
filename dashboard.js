@@ -630,12 +630,13 @@ function renderOverview(){
   return `
     ${breadcrumb(['All Cities', city], ['ov-city-null'])}
     <div class="flex-between">
-      <div class="section-title" style="margin:0">Marketing Areas (${rows.length})</div>${cpoSummaryMode ? '<div class="section-note">Cost and CPO are only available at city level in the current CPO_Budget_MTD source. Area cells are intentionally unavailable.</div>' : ''}
+      <div class="section-title" style="margin:0">Marketing Areas (${rows.length})</div>
       <div class="toggle-group">
         <div class="toggle-btn ${win==='yesterday'?'active':''}" data-window="yesterday">Yesterday</div>
         <div class="toggle-btn ${win==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
       </div>
     </div>
+    ${cpoSummaryMode ? '<div class="section-note">Cost and CPO are only available at city level in the current CPO_Budget_MTD source. Area cells are intentionally unavailable.</div>' : ''}
     <div class="table-wrap">
       <table>
         <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>${cpoCostTitle}</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
