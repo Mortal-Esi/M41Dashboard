@@ -230,7 +230,7 @@ Access) is the route.
     data/BI team why the two don't match.
 
 - **CPO Budget tab (current source schema)**: the active `All_Done / CPO_Budget_MTD`
-  tab contains **144 non-empty data rows, pre-aggregated** by `City`,
+  tab contains **pre-aggregated data rows** by `City`,
   `Kitchen_Group`, and `Vendor_Group`. It has no `VendorID` or
   `MarketingAreaName`; the former per-vendor CPO pipeline is obsolete.
   The main data refresh uses `cpo_summary.js` to validate the source
@@ -256,6 +256,7 @@ Access) is the route.
     estimates and CPO but not Kitchen spend (unavailable).
     Impression vendor classes come from MainData (fallback:
     MotherVendors), not from the CPO summary.
+  - **Regression test**: run `node cpo_summary.test.js` before refreshing.
   - **Publishing**: `dashboard.html` consumes **encrypted**
     `dashboard_data.enc`, not Google Sheets directly. Changing source
     parsing/UI does **not** update live figures: run the existing
