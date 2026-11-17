@@ -229,47 +229,39 @@ Access) is the route.
     that discrepancy is resolved at the source. Worth asking the
     data/BI team why the two don't match.
 
-- **CPO Budget tab**: month-to-date (Gregorian calendar month, updated
-  daily — same MTD convention as the rest of the dashboard), read
-  from the `CPO_Budget_MTD` tab. The `CPO_Budget_Aug` and
-  `CPO_Budget_sep` tabs are **not** read — their data isn't
-  considered valid. The sheet has ~1,900 fully blank trailing rows
-  (padding); only rows with a `VendorID` are kept. Only four of the
-  sheet's numeric columns are trusted: `Product_Subsidy_Budget_new`,
-  `Free_Delivery_Budget_new`, `new_total_budget` and `new_cpo`; the
-  dashboard drops the "new" from their labels (Subsidy Budget, Free
-  Delivery Budget, Total Budget, CPO).
-  - **CPO** = Total Budget ÷ M4O Orders (the sheet's own `new_cpo`).
-  - **Free Delivery CPO** = Free Delivery Budget ÷ M4O Orders.
-  - **Subsidy CPO** = Subsidy Budget ÷ M4O Orders. Total Budget is
-    exactly Subsidy + Free Delivery, so CPO = Subsidy CPO + Free
-    Delivery CPO.
-  - **Every budget figure carries its % of the project-wide grand
-    total for that same metric** next to the Toman amount (e.g.
-    "12.3M T (18%)") — a raw amount alone doesn't say whether a city
-    or segment is 2% or 40% of spend. Large amounts are shown compact
-    (`K`/`M`/`B`) instead of full Toman digits.
-  - **Just two breakdowns** instead of the old four: geography
-    (City → Marketing Area → Vendor, unchanged) and segment. The
-    segment breakdown is **Kitchen vs. Non-Kitchen**, with Non-Kitchen
-    further split into **Top Critical / Critical / Other** (Other =
-    Important + Ordinary + anything uncategorized) — using the CPO
-    sheet's own `VendorClass` column. The old separate By Vendor Tier
-    and By New Vendor Class tables were dropped; `VendorTier` and
-    `new_VendorClass` are still shown per-vendor in the drill-down
-    table for context.
-  - **Kitchen is kept fully separate** in that segment breakdown —
-    Kitchen vendors can also be Critical/TopCritical/etc., so mixing
-    them in would double-count them. The City → Marketing Area →
-    Vendor drill-down is unaffected by this and includes Kitchen
-    vendors normally (tagged with the Kitchen badge), since that's a
-    geography view, not a segment view.
-  - Doesn't respect the Vendor Type filter (hidden on this tab, like
-    Kitchen) — it has its own segmentation already.
-  - The same Kitchen/Top Critical/Critical/Other segmentation is
-    reused by the Impression tab's conversion breakdown (via a shared
-    `vendorSegmentClass()` helper), so the two tabs use one consistent
-    vendor segmentation.
+- **CPO Budget tab (current source schema)**: the active `All_Done / CPO_Budget_MTD`
+  tab contains **144 non-empty data rows, pre-aggregated** by `City`,
+  `Kitchen_Group`, and `Vendor_Group`. It has no `VendorID` or
+  `MarketingAreaName`; the former per-vendor CPO pipeline is obsolete.
+  The main data refresh uses `cpo_summary.js` to validate the source
+  schema and reconcile city and group order totals before publishing.
+  - **Scope**: Non-Kitchen only. The tab includes `All cities` and
+    `Total Non-Kitchen` subtotal rows. These must not be counted twice.
+    The source does not supply Kitchen CPO or Marketing Area/vendor CPO.
+    Those fields are unavailable, **not zero**.
+  - **Metrics**: `M41_Orders` (MTD order count), `CPO Total`,
+    `CPO Product Subsidy`, `CPO Free Delivery` (Toman per M41
+    order), `AOV` (Toman per order), their three reported / AOV
+    percentages, and `Share of M41 Orders` (% within the displayed
+    city/group rollup). The national total and all city/group values
+    are read directly; CPO percentages are not averaged unweighted.
+  - **Estimated Total Cost** = `M41_Orders × CPO Total` from the
+    rounded whole-Toman per-order source. It is clearly labeled
+    estimated rather than an audited spend/budget measure.
+  - **Breakdowns**: All Cities → city; city → Top Critical, Critical,
+    Others. The tab deliberately omits the old Marketing Area/vendor
+    drill-down because the current source cannot support it.
+  - **Dependent tabs**: Overview uses city-level Cost/CPO and marks
+    Marketing Area amounts as unavailable. Kitchen shows Non-Kitchen
+    estimates and CPO but not Kitchen spend (unavailable).
+    Impression vendor classes come from MainData (fallback:
+    MotherVendors), not from the CPO summary.
+  - **Publishing**: `dashboard.html` consumes **encrypted**
+    `dashboard_data.enc`, not Google Sheets directly. Changing source
+    parsing/UI does **not** update live figures: run the existing
+    `refresh-dashboard.bat` locally with your configured service account
+    and encryption credentials, then verify the newly published snapshot.
+    The new UI is backward-compatible with older encrypted snapshots.
 
 - **Availability** (Pack Distribution tab, all levels): of the packs
   that are active right now (`Activity == 1`, `Deleted == 0`), what share actually picked up
