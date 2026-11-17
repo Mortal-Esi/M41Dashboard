@@ -24,6 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 const { buildCoverageHistory, buildLeadsModule, readDailyJiraFile } = require('./history_modules');
+const { buildCpoSummary } = require('./cpo_summary');
 
 // ============================================================
 // CONFIG — edit these lines
@@ -337,12 +338,16 @@ async function main() {
 
   console.log('Fetching CPO_Budget_MTD…');
   const cpoBudgetRaw = await fetchSheetAsObjects(sheets, SPREADSHEET_ID, SHEET_NAMES.cpoBudget);
-  // The sheet has ~1900 fully blank trailing rows — keep only real vendor rows.
-  const cpoRows = cpoBudgetRaw.filter((r) => r.VendorID !== null && r.VendorID !== undefined && r.VendorID !== '');
-  // Built early so MODULE 7 (Impression) can also segment vendors by
-  // TopCritical / Critical / Other, the same categorization CPO Budget uses.
-  const vendorClassByVendorId = new Map(cpoRows.map((r) => [String(r.VendorID), r.VendorClass || 'Unknown']));
-  console.log(`  CPO_Budget_MTD: ${cpoBudgetRaw.length} rows (${cpoRows.length} real)`);
+  // The CPO tab is now CITY × SEGMENT summaries without VendorID.
+  // Impression still needs vendor classes, so join those from MainData
+  // (with MotherVendors as fallback), never from the CPO summary.
+  const vendorClassByVendorId = new Map();
+  for (const r of [...orderRaw, ...mainRaw]) {
+    if (r.VendorID != null && r.VendorClass) {
+      vendorClassByVendorId.set(String(r.VendorID), r.VendorClass);
+    }
+  }
+  console.log(`  CPO_Budget_MTD: ${cpoBudgetRaw.length} source rows`);
 
   // Dedupe by PackID (a handful of packs appear twice in the source sheet) — sum both.
   const impressionByPackId = new Map();
@@ -1224,93 +1229,13 @@ async function main() {
   console.log(`  Impression processed: ${impressionPacks.length} packs, ${overallImpression.total} total impressions`);
 
   // ============================================================
-  // MODULE 8: CPO BUDGET (month-to-date, Gregorian month, updated daily)
+  // MODULE 8: CPO COST PER ORDER (month-to-date)
+  // Aggregated city / segment rows from CPO_Budget_MTD — NOT per-vendor.
+  // The parser guards against missing columns, duplicate groups, and
+  // double-counting "All cities" or "Total Non-Kitchen" rows.
   // ============================================================
-  const cpoVendors = cpoRows.map((r) => ({
-    id: r.VendorID,
-    name: r.VendorTitle,
-    city: r.City,
-    area: r.MarketingAreaName,
-    vendorClass: r.VendorClass || 'Unknown',
-    vendorTier: r.VendorTier || 'Unknown',
-    newVendorClass: r.new_VendorClass || 'Unknown',
-    kitchen: toNum(r.Kitchen, 0) === 1,
-    decile: toNum(r.Decile, null),
-    segment: r.Segment || 'Unknown',
-    subsidyBudget: toNum(r.Product_Subsidy_Budget_new, 0),
-    freeDeliveryBudget: toNum(r.Free_Delivery_Budget_new, 0),
-    totalBudget: toNum(r.new_total_budget, 0),
-    m4oOrders: toNum(r.M41_Orders, 0),
-    totalSold: toNum(r.TotalSold, 0),
-  }));
-
-  // Every budget figure also carries its % of the project-wide grand TOTAL
-  // BUDGET (totalBudget_pct, subsidyBudget_pct, freeDeliveryBudget_pct all
-  // share the same ref.totalBudget denominator) — a raw Toman number alone
-  // doesn't say whether a city/segment is 2% or 40% of spend, so refs (the
-  // grand totals) are threaded through every breakdown. m4oOrders_pct is the
-  // one exception: it's share of total M4O ORDERS, not budget.
-  function cpoMetrics(rows, refs) {
-    const subsidyBudget = rows.reduce((s, r) => s + r.subsidyBudget, 0);
-    const freeDeliveryBudget = rows.reduce((s, r) => s + r.freeDeliveryBudget, 0);
-    const totalBudget = rows.reduce((s, r) => s + r.totalBudget, 0);
-    const m4oOrders = rows.reduce((s, r) => s + r.m4oOrders, 0);
-    const totalSold = rows.reduce((s, r) => s + r.totalSold, 0);
-    const ref = refs || { totalBudget, subsidyBudget, freeDeliveryBudget, m4oOrders };
-    return {
-      vendorCount: rows.length,
-      subsidyBudget, freeDeliveryBudget, totalBudget, m4oOrders, totalSold,
-      subsidyBudget_pct: pct(subsidyBudget, ref.totalBudget),
-      freeDeliveryBudget_pct: pct(freeDeliveryBudget, ref.totalBudget),
-      totalBudget_pct: pct(totalBudget, ref.totalBudget),
-      m4oOrders_pct: pct(m4oOrders, ref.m4oOrders),
-      cpo: m4oOrders ? totalBudget / m4oOrders : null,
-      freeDeliveryCpo: m4oOrders ? freeDeliveryBudget / m4oOrders : null,
-    };
-  }
-  function vendorCpoFields(v) {
-    return {
-      cpo: v.m4oOrders ? v.totalBudget / v.m4oOrders : null,
-      freeDeliveryCpo: v.m4oOrders ? v.freeDeliveryBudget / v.m4oOrders : null,
-    };
-  }
-  const grandTotalRefs = cpoMetrics(cpoVendors); // self-referential: 100% of itself
-  const cpoRefs = { totalBudget: grandTotalRefs.totalBudget, subsidyBudget: grandTotalRefs.subsidyBudget, freeDeliveryBudget: grandTotalRefs.freeDeliveryBudget, m4oOrders: grandTotalRefs.m4oOrders };
-
-  const nonKitchenCpoVendors = cpoVendors.filter((v) => !v.kitchen);
-  const kitchenCpoVendors = cpoVendors.filter((v) => v.kitchen);
-
-  const cpoByCity = {};
-  const byCityCpo = groupBy(cpoVendors, (v) => v.city);
-  for (const [city, cVendors] of byCityCpo) {
-    const areas = {};
-    const byAreaCpo = groupBy(cVendors, (v) => v.area);
-    for (const [area, aVendors] of byAreaCpo) {
-      areas[area] = {
-        ...cpoMetrics(aVendors, cpoRefs),
-        vendors: aVendors.map((v) => ({ ...v, ...vendorCpoFields(v) })),
-      };
-    }
-    cpoByCity[city] = { ...cpoMetrics(cVendors, cpoRefs), areas };
-  }
-
-  const nonKitchenBySegment = {};
-  for (const [seg, rows] of groupBy(nonKitchenCpoVendors, (v) => vendorSegmentClass(v.vendorClass))) {
-    nonKitchenBySegment[seg] = cpoMetrics(rows, cpoRefs);
-  }
-
-  const cpoBudgetModule = {
-    overall: {
-      all: grandTotalRefs,
-      nonKitchen: {
-        total: cpoMetrics(nonKitchenCpoVendors, cpoRefs),
-        bySegment: nonKitchenBySegment,
-      },
-      kitchen: { total: cpoMetrics(kitchenCpoVendors, cpoRefs) },
-    },
-    byCity: cpoByCity,
-  };
-  console.log(`  CPO Budget processed: ${cpoVendors.length} vendors, total budget ${Math.round(cpoBudgetModule.overall.all.totalBudget)} T`);
+  const cpoBudgetModule = buildCpoSummary(cpoBudgetRaw);
+  console.log(`  CPO summary processed: ${Object.keys(cpoBudgetModule.byCity).length} cities, ${cpoBudgetModule.overall.all.m4oOrders} orders`);
 
   // ============================================================
   // ASSEMBLE + WRITE
