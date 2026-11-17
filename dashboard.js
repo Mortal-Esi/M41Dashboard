@@ -485,6 +485,8 @@ function renderOverview(){
   const filtered = superTypeFilter !== 'all';
   const win = orderWindow;
   const vcAll = DATA.vendorCoverage, pdAll = DATA.packDistribution, rtAll = DATA.rating, osAll = DATA.orderShare, cpoAll = cpoNonKitchen(); // budget/CPO here are Non-Kitchen only, same as the CPO Budget tab
+  const cpoSummaryMode = !!(cpoAll && cpoAll.sourceSchema === 'city_group_summary_v2');
+  const cpoCostTitle = cpoSummaryMode ? 'Estimated Cost (Non-Kitchen)' : 'Total Budget (Non-Kitchen)';
 
   function vendorPackRateForCity(city){
     const vcCity = vcAll[city];
@@ -531,14 +533,14 @@ function renderOverview(){
     const overallShare = totalPlat ? totalM41/totalPlat : 0;
     const overallAreaShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.m4oCitiesShare:osAll.overallMtd.m4oCitiesShare) : undefined;
     const overallAllCitiesShare = !filtered ? (win==='yesterday'?osAll.overallYesterday.allCitiesShare:osAll.overallMtd.allCitiesShare) : undefined;
-    const totalBudget = cpoAll ? cpoAll.overall.all.totalBudget : null;
+    const totalBudget = cpoAll ? (cpoSummaryMode ? cpoAll.overall.all.estimatedTotalCost : cpoAll.overall.all.totalBudget) : null;
     const overallCpo = cpoAll ? cpoAll.overall.all.cpo : null;
     const tc = DATA.topCriticalEngagement;
     const tcByCity = DATA.topCriticalEngagementByCity || {};
 
     return `
       ${breadcrumb(['All Cities'])}
-      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, Top Critical engagement, budget and coverage together, per city and Marketing Area. Budget and CPO exclude Kitchen vendors (numerator and denominator), matching the CPO Budget tab.${!filtered ? '' : ' Budget, CPO, Coverage and Top Critical figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
+      <div class="section-note">A cross-module summary — vendors, packs, rating, order share, Top Critical engagement, budget and coverage together, per city and Marketing Area. Budget and CPO exclude Kitchen vendors (numerator and denominator), matching the CPO Budget tab.${cpoSummaryMode ? ' Costs are estimates from rounded CPO × orders, and no Marketing Area breakdown exists in the CPO source.' : ''}${!filtered ? '' : ' Budget, CPO, Coverage and Top Critical figures are never affected by the Vendor Type filter — their source data has no per-row Vendor Type.'}</div>
       <div class="flex-between">
         <div class="section-title" style="margin:0">Overview</div>
         <div class="toggle-group">
@@ -555,12 +557,12 @@ function renderOverview(){
         ${overallAreaShare !== undefined ? `<div class="stat-card seg-b"><div class="label">Order Share (M4O Cities)</div><div class="value small">${overallAreaShare!==null?shareToPct(overallAreaShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${overallAllCitiesShare !== undefined ? `<div class="stat-card"><div class="label">Order Share (All Cities)</div><div class="value small">${overallAllCitiesShare!==null?shareToPct(overallAllCitiesShare):'<span class="dim">—</span>'}</div></div>` : ''}
         ${tc ? `<div class="stat-card"><div class="label">Top Critical Engagement</div><div class="value small">${shareToPct(tc.rate)}</div><div class="sub">${fmt(tc.numerator)} / ${fmt(tc.denominator)} ordered M4O (30 days)</div></div>` : ''}
-        ${totalBudget !== null ? `<div class="stat-card"><div class="label">Total Budget (Non-Kitchen)</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
+        ${totalBudget !== null ? `<div class="stat-card"><div class="label">${cpoCostTitle}</div><div class="value small">${tomanCompact(totalBudget)}</div></div>` : ''}
         ${overallCpo !== null ? `<div class="stat-card accent"><div class="label">CPO (Non-Kitchen)</div><div class="value small">${tomanCompact(overallCpo)}</div></div>` : ''}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>TC Engaged</th><th>Total Budget (Non-Kitchen)</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
+          <thead><tr><th>City</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>Order Share (M4O Cities)</th><th>TC Engaged</th><th>${cpoCostTitle}</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
           <tbody>
             ${rows.map(r => `<tr class="clickable" data-action="ov-city" data-city="${escapeAttr(r.city)}">
               <td>${escapeHtml(r.city)}</td>
@@ -571,7 +573,7 @@ function renderOverview(){
               <td style="font-family:var(--mono); color:var(--purple)">${r.platformOrders?shareToPct(r.share):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono); color:var(--seg-b)">${r.m4oCitiesShare!==undefined && r.m4oCitiesShare!==null?shareToPct(r.m4oCitiesShare):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono)">${tcByCity[r.city] ? tcEngagedCell(tcByCity[r.city].total, tcByCity[r.city].noOrder) : '<span class="dim">—</span>'}</td>
-              <td style="font-family:var(--mono)">${r.cpo?tomanCompact(r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
+              <td style="font-family:var(--mono)">${r.cpo?tomanCompact(cpoSummaryMode ? r.cpo.estimatedTotalCost : r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
               <td style="font-family:var(--mono); color:var(--accent)">${r.cpo&&r.cpo.cpo!==null?tomanCompact(r.cpo.cpo):'<span class="dim">—</span>'}</td>
               <td>${overviewStatusBadge(r.status)}</td>
             </tr>`).join('')}
@@ -612,7 +614,7 @@ function renderOverview(){
       }
     }
     const cpoCityData = cpoAll && cpoAll.byCity[city];
-    const cpoArea = cpoCityData && cpoCityData.areas[area] ? cpoCityData.areas[area] : null;
+    const cpoArea = cpoCityData && cpoCityData.areas && cpoCityData.areas[area] ? cpoCityData.areas[area] : null;
     const status = overviewCoverageStatus(city, area);
     return { area, vendors, packs, avgRate, m41Orders, platformOrders, share, areaM4OShare, cpo: cpoArea, status };
   }).filter(r => r.vendors > 0 || r.packs > 0).sort((a,b)=> b.vendors - a.vendors);
@@ -634,9 +636,10 @@ function renderOverview(){
         <div class="toggle-btn ${win==='mtd'?'active':''}" data-window="mtd">Month to Date</div>
       </div>
     </div>
+    ${cpoSummaryMode ? '<div class="section-note">Cost and CPO are only available at city level in the current CPO_Budget_MTD source. Area cells are intentionally unavailable.</div>' : ''}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>Total Budget (Non-Kitchen)</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
+        <thead><tr><th>Area</th><th>Vendors</th><th>Packs</th><th>Avg Rate</th><th>M4O Orders</th><th>Vendor Engagement</th><th>M4O Share of Total Platform Orders (Area)</th><th>TC Engaged</th><th>${cpoCostTitle}</th><th>CPO (Non-Kitchen)</th><th>Coverage</th></tr></thead>
         <tbody>
           ${rows.map(r => `<tr>
             <td>${escapeHtml(r.area)}</td>
@@ -647,7 +650,7 @@ function renderOverview(){
             <td style="font-family:var(--mono); color:var(--purple)">${r.platformOrders?shareToPct(r.share):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--seg-b)">${r.areaM4OShare!==undefined?shareToPct(r.areaM4OShare):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono)">${tcByArea[r.area] ? tcEngagedCell(tcByArea[r.area].total, tcByArea[r.area].noOrder) : '<span class="dim">—</span>'}</td>
-            <td style="font-family:var(--mono)">${r.cpo?tomanCompact(r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
+            <td style="font-family:var(--mono)">${r.cpo?tomanCompact(cpoSummaryMode ? r.cpo.estimatedTotalCost : r.cpo.totalBudget):'<span class="dim">—</span>'}</td>
             <td style="font-family:var(--mono); color:var(--accent)">${r.cpo&&r.cpo.cpo!==null?tomanCompact(r.cpo.cpo):'<span class="dim">—</span>'}</td>
             <td>${overviewStatusBadge(r.status)}</td>
           </tr>`).join('')}
@@ -1643,12 +1646,13 @@ function renderKitchen(){
             <tr><td>Vendor Engagement</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(o[m4oShare])}</td><td style="font-family:var(--mono); color:var(--purple)">${shareToPct(nk[m4oShare])}</td></tr>
             <tr><td>Share of ALL M4O Orders (project-wide)</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(o[shareOfAll])}</td><td style="font-family:var(--mono); color:var(--seg-b)">${shareToPct(nk[shareOfAll])}</td></tr>
             ${DATA.impression ? `<tr><td>Share of Total Impressions (yesterday)</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.kitchenTotal_pct)}</td><td style="font-family:var(--mono); color:var(--purple)">${pct1(DATA.impression.overall.nonKitchenTotal_pct)}</td></tr>` : ''}
-            ${DATA.cpoBudget ? `<tr><td>Total Budget (MTD)</td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.kitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.kitchen.total.totalBudget_pct)})</span></td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.nonKitchen.total.totalBudget_pct)})</span></td></tr>
+            ${DATA.cpoBudget && DATA.cpoBudget.overall.kitchen ? `<tr><td>Total Budget (MTD)</td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.kitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.kitchen.total.totalBudget_pct)})</span></td><td style="font-family:var(--mono)">${tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.totalBudget)} <span class="dim">(${pct1(DATA.cpoBudget.overall.nonKitchen.total.totalBudget_pct)})</span></td></tr>
             <tr><td>CPO (MTD)</td><td style="font-family:var(--mono); color:var(--accent)">${DATA.cpoBudget.overall.kitchen.total.cpo!==null?tomanCompact(DATA.cpoBudget.overall.kitchen.total.cpo):'<span class="dim">—</span>'}</td><td style="font-family:var(--mono); color:var(--accent)">${DATA.cpoBudget.overall.nonKitchen.total.cpo!==null?tomanCompact(DATA.cpoBudget.overall.nonKitchen.total.cpo):'<span class="dim">—</span>'}</td></tr>` : ''}
+            ${cpoKitchenSummaryRows()}
           </tbody>
         </table>
       </div>
-      <div class="section-note">"Avg Snapp Discount" for Kitchen is N/A here because Kitchen packs use a structurally different pricing/discount model than regular packs — averaging them together (or even as a separate like-for-like average) isn't a meaningful comparison. See the README for details.${!DATA.impression || !DATA.cpoBudget ? ' Impression/Budget rows above need node update_dashboard.js re-run to appear.' : ''}</div>
+      <div class="section-note">"Avg Snapp Discount" for Kitchen is N/A here because Kitchen packs use a structurally different pricing/discount model than regular packs — averaging them together (or even as a separate like-for-like average) isn't a meaningful comparison. See the README for details. The current CPO source reports Non-Kitchen only, so Kitchen cost cannot be inferred.${!DATA.impression || !DATA.cpoBudget ? ' Impression/Budget rows above need node update_dashboard.js re-run to appear.' : ''}</div>
       <div class="section-title">Kitchen Cities</div>
       <div class="card-grid">
         ${cities.map(([city,v]) => `<div class="list-card" data-action="kt-city" data-city="${escapeAttr(city)}">
@@ -1729,6 +1733,7 @@ let cpoNkCache = null, cpoNkCacheFor = null;
 function cpoNonKitchen(){
   const src = DATA.cpoBudget;
   if(!src) return null;
+  if(src.sourceSchema === 'city_group_summary_v2') return src;
   if(cpoNkCacheFor === src) return cpoNkCache;
   const vendorsOf = (areas) => Object.values(areas).flatMap(a => a.vendors.filter(v => !v.kitchen));
   const all = Object.values(src.byCity).flatMap(c => vendorsOf(c.areas));
@@ -1791,6 +1796,7 @@ function renderCpoBudget(){
   if(!cpo){
     return `<div class="empty-state">No CPO Budget data available. Re-run <code>node update_dashboard.js</code> to generate it.</div>`;
   }
+  if(cpo.sourceSchema === 'city_group_summary_v2') return renderCpoBudgetSummary(cpo);
   const d = drill.cpoBudget;
 
   if(!d.city){
@@ -2809,7 +2815,9 @@ function drawCharts(){
 
   if(currentPanel === 'cpoBudget' && !drill.cpoBudget.city){
     const cpo = cpoNonKitchen();
-    if(cpo){
+    if(cpo && cpo.sourceSchema === 'city_group_summary_v2'){
+      drawCpoSummaryCharts(cpo);
+    } else if(cpo){
       const nk = cpo.overall.nonKitchen;
       const seg = nk.bySegment;
       const ctx1 = document.getElementById('cpoSegmentChart');
