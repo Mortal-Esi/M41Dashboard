@@ -46,6 +46,8 @@ function renderDedicatedSupply(){
     ds.status==='source_error'?'The dedicated Sheet could not be read during the latest refresh. Check access and tab structure.':
     ds.status==='empty_ids'?'The first tab has no readable Product IDs.':'';
   const items=ds.items||[], s=ds.summary||{};
+  const validSource = ds.status==='ok' || ds.status==='empty_ids';
+  const sourceKpi = value => validSource ? dsNumber(value) : '—';
   const cities=[...new Set(items.map(r=>r.city).filter(Boolean))].sort();
   const daily=ds.daily||{status:'missing',rows:[],days:[],latest:null,issues:[]};
   const selectedDate=dsDate==='latest'||!(daily.days||[]).includes(dsDate)?daily.latest:dsDate;
@@ -84,27 +86,30 @@ function renderDedicatedSupply(){
   if(sourceIssue) html+='<div class="detail-panel" style="border-color:var(--warn)"><b style="color:var(--warn)">Source setup required</b><div class="section-note" style="margin:8px 0 0">'+escapeHtml(sourceIssue)+'</div></div>';
   if(ds.status==='source_error'&&ds.sourceError) html+='<div class="section-note">Read error: '+escapeHtml(ds.sourceError)+'</div>';
   html+='<div class="stat-row">'+
-    dsStat('Tracked IDs',dsNumber(s.tracked),'Unique values in source tab')+
-    dsStat('Matched to MainData',dsNumber(s.matched),'ProductID or fallback PackID')+
-    dsStat('Active in catalog',dsNumber(s.active),'Of the matched products','var(--seg-a)')+
-    dsStat('Seen yesterday',dsNumber(s.productsSeenYesterday),'Products with impressions')+
-    dsStat('Impressions · yesterday',dsNumber(s.impressionsYesterday),'Not product sales')+
-    dsStat('Vendors',dsNumber(s.vendors),'Distinct matched Vendor IDs')+
+    dsStat('Tracked IDs',sourceKpi(s.tracked),'Unique values in source tab')+
+    dsStat('Matched to MainData',sourceKpi(s.matched),'ProductID or fallback PackID')+
+    dsStat('Active in catalog',sourceKpi(s.active),'Of the matched products','var(--seg-a)')+
+    dsStat('Seen yesterday',sourceKpi(s.productsSeenYesterday),'Products with impressions')+
+    dsStat('Impressions · yesterday',sourceKpi(s.impressionsYesterday),'Not product sales')+
+    dsStat('Vendors',sourceKpi(s.vendors),'Distinct matched Vendor IDs')+
     '</div>';
   if((s.packIdFallbacks||0)>0 || (s.notFound||0)>0 || (s.ambiguous||0)>0 || (ds.duplicates||0)>0)
     html+='<div class="section-note">Data quality: '+fmt(s.packIdFallbacks||0)+' IDs matched via PackID (verify ProductID = PackID), '+fmt(s.notFound||0)+' missing in MainData, '+fmt(s.ambiguous||0)+' ambiguous and '+fmt(ds.duplicates||0)+' duplicate IDs removed. Missing in MainData does not mean the product does not exist.</div>';
   html+='<div class="section-title">Daily procurement &amp; sell-through</div>';
-  if(daily.status==='missing'){
+  if(!validSource){
+    html+='<div class="section-note">Daily metrics are unavailable until the source Sheet can be read and a new encrypted snapshot is published.</div>';
+  } else if(daily.status==='missing'){
     html+='<div class="detail-panel"><div class="dname">Daily operational data not connected</div><div class="section-note" style="margin:0">Add an optional <code>DedicatedSupplyDaily</code> tab to the same Sheet. One row per Date × ProductID × VendorID with Date, ProductID, VendorID, PurchasedQty and SoldQty. Add OpeningStockQty, WasteQty, ReturnedQty, ClosingStockQty, UnitCostToman, NetSalesToman for stock reconciliation and estimated contribution. Without these fields, purchased units, sold units, stock, sell-through and profitability are unavailable—not zero.</div></div>';
   } else if(!daily.latest){
     html+='<div class="section-note">Daily ledger exists, but contains no valid date/product rows.</div>';
   } else {
+    if(daily.status==='quality_warning') html+='<div class="section-note" style="color:var(--warn)">Partial / invalid daily feed: metrics below cover accepted rows only, not necessarily the complete day. Resolve quality warnings before relying on totals.</div>';
     html+='<div class="filter-bar">'+dsSelect('dsDate','Daily snapshot',(daily.days||[]).slice().reverse().map(d=>[d,d]),selectedDate)+'</div>';
     html+='<div class="stat-row">'+
       dsStat('Purchased qty',dsNumber(ops.purchased),'Latest selected day')+
       dsStat('Sold qty',dsNumber(ops.sold),'Reported product-level sales')+
       dsStat('Sell-through',ops.sellThrough===null?'—':pct1(ops.sellThrough),'Sold / (opening stock + purchased)')+
-      dsStat('Closing stock',dsNumber(ops.closing),'Only with reconciled stock data')+
+      dsStat('Closing stock',dsNumber(ops.closing),'Reported; reconciled where inputs permit')+
       dsStat('Waste qty',dsNumber(ops.waste),'Reported write-off')+
       dsStat('Net sales',dsMoney(ops.netSales),'Only when all rows report value')+
       dsStat('Est. contribution',dsMoney(ops.contribution),'Net sales − sold × unit cost; before other costs')+
