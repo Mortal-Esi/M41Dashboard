@@ -21,7 +21,7 @@ function dsStat(title,value,detail='',color='') {
 }
 function dsAvailabilityStat(available,total,validSource) {
   const complete=validSource && total>0;
-  const percent=complete ? (available / total * 100).toFixed(1).replace(/\\.0$/,'')+'%' : '—';
+  const percent=complete ? (available / total * 100).toFixed(1).replace(/\.0$/,'')+'%' : '—';
   return '<div class="stat-card"><div class="label">Availability</div><div class="value small" style="color:var(--seg-a)">'+percent+'</div>'+
     (complete?'<div class="sub">'+fmt(available)+' / '+fmt(total)+'</div>':'')+'</div>';
 }
