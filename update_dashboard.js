@@ -89,6 +89,25 @@ async function fetchSheetAsObjects(sheets, spreadsheetId, sheetName) {
   });
 }
 
+
+// Google Sheets applies read quotas per minute per service-account identity.
+// Retry only transient rate-limit failures (not permission/not-found errors).
+async function withSheetQuotaRetry(operation, label) {
+  const delays = [0, 2000, 4000, 8000, 16000, 32000];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    try { return await operation(); }
+    catch (error) {
+      const message = String(error && error.message || error);
+      const code = Number(error && (error.code || error.response?.status));
+      const quota = code === 429 || /quota exceeded|rate limit exceeded|read requests per minute|userRateLimitExceeded|rateLimitExceeded/i.test(message);
+      if (!quota || attempt === delays.length - 1) throw error;
+      console.warn('  Sheets quota reached for ' + label + '; retry '
+        + (attempt + 1) + '/' + (delays.length - 1) + ' after backoff.');
+    }
+  }
+}
+
 async function listSheetTitles(sheets, spreadsheetId) {
   const res = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
   return (res.data.sheets || []).map((s) => s.properties.title);
@@ -471,29 +490,32 @@ async function main() {
   let dsSourceStatus = 'not_configured', dsSourceError = '';
   if (DEDICATED_SUPPLY_SPREADSHEET_ID) {
     try {
-      const dsMetadata = await sheets.spreadsheets.get({
+      const dsMetadata = await withSheetQuotaRetry(() => sheets.spreadsheets.get({
         spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
         fields: 'sheets(properties(title,index,hidden,sheetType))',
-      });
+      }), 'Dedicated metadata');
       const dsTabs = (dsMetadata.data.sheets || []).map(s => s.properties)
         .filter(p => !p.hidden && (!p.sheetType || p.sheetType === 'GRID'))
         .sort((a,b) => a.index - b.index);
       if (!dsTabs.length) throw new Error('No visible grid tab in Dedicated Supply sheet');
       const sheetRange = name => "'" + String(name).replace(/'/g,"''") + "'";
-      dsSourceTab = dsTabs[0].title;
-      const dsGridResponse = await sheets.spreadsheets.values.get({
+      // Only the explicitly named Dedicated tab; never include the Force tab.
+      const dedicatedTab = dsTabs.find(p => p.title === 'Dedicated');
+      if (!dedicatedTab) throw new Error('Dedicated tab is missing');
+      dsSourceTab = dedicatedTab.title;
+      const dsGridResponse = await withSheetQuotaRetry(() => sheets.spreadsheets.values.get({
         spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
         range: sheetRange(dsSourceTab),
         valueRenderOption: 'FORMATTED_VALUE',
-      });
+      }), 'Dedicated rows');
       dsIdGrid = dsGridResponse.data.values || [];
       const ledgerTab = dsTabs.find(p => /^(DedicatedSupplyDaily|DS_Daily)$/i.test(p.title));
       if (ledgerTab) {
-        const ledgerResponse = await sheets.spreadsheets.values.get({
+        const ledgerResponse = await withSheetQuotaRetry(() => sheets.spreadsheets.values.get({
           spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
           range: sheetRange(ledgerTab.title),
           valueRenderOption: 'FORMATTED_VALUE',
-        });
+        }), 'Dedicated daily ledger');
         const grid = ledgerResponse.data.values || [];
         if (grid.length) {
           const headers = grid[0];
