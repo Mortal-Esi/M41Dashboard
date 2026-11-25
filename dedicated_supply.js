@@ -61,6 +61,15 @@ function readProductIds(grid) {
   }
   return {ids, duplicates, header, invalidRows, records, missingStock};
 }
+function clock(v) {
+  const raw=textOf(v);
+  if (!raw) return null;
+  const match=/^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(raw);
+  if (!match) return null;
+  const hh=Number(match[1]), mm=Number(match[2]);
+  if(hh>23||mm>59)return null;
+  return String(hh).padStart(2,'0')+':'+match[2];
+}
 function ymd(v) {
   const s = textOf(v);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
@@ -92,6 +101,11 @@ function mapDaily(raw, ids) {
     const closingReported = numberOf(field(r,['ClosingStockQty']));
     const unitCost = numberOf(field(r,['UnitCostToman']));
     const netSales = numberOf(field(r,['NetSalesToman']));
+    const availabilityFromRaw=field(r,['AvailableFrom','AvailabilityFrom','AvailableStart']);
+    const availabilityToRaw=field(r,['AvailableTo','AvailabilityTo','AvailableEnd']);
+    const availabilityFrom=clock(availabilityFromRaw), availabilityTo=clock(availabilityToRaw);
+    if (availabilityFromRaw && !availabilityFrom) issues.push('Row '+(i+2)+': invalid AvailableFrom HH:MM');
+    if (availabilityToRaw && !availabilityTo) issues.push('Row '+(i+2)+': invalid AvailableTo HH:MM');
     const fullyReconciled = opening !== null && waste !== null && returned !== null;
     const closingExpected = fullyReconciled ? opening+purchased-sold-waste-returned : null;
     if (closingExpected !== null && closingExpected < 0)
@@ -100,6 +114,7 @@ function mapDaily(raw, ids) {
       issues.push('Row '+(i+2)+': closing stock does not reconcile');
     rows.push({
       date, productId:id, vendorId, purchased, sold, opening, waste, returned,
+      availabilityFrom, availabilityTo,
       closing: closingReported !== null ? closingReported : closingExpected,
       available: opening !== null ? opening+purchased : null,
       unitCost, netSales,
@@ -226,4 +241,4 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, impressionSlots
     }
   };
 }
-module.exports = {readProductIds, mapDaily, observedExposure, buildDedicatedSupply};
+module.exports = {readProductIds, mapDaily, observedExposure, buildDedicatedSupply, clock};
