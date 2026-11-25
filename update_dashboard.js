@@ -25,6 +25,7 @@ const path = require('path');
 const { google } = require('googleapis');
 const { buildCoverageHistory, buildLeadsModule, readDailyJiraFile } = require('./history_modules');
 const { buildCpoSummary } = require('./cpo_summary');
+const { buildDedicatedSupply } = require('./dedicated_supply');
 
 // ============================================================
 // CONFIG — edit these lines
@@ -40,6 +41,7 @@ const COVERAGE_SPREADSHEET_ID = process.env.COVERAGE_SPREADSHEET_ID || LOCAL_CON
 const DELIVERY_SPREADSHEET_ID = process.env.DELIVERY_SPREADSHEET_ID || LOCAL_CONFIG.DELIVERY_SPREADSHEET_ID || 'PASTE_YOUR_DELIVERY_SPREADSHEET_ID_HERE'; // per-day tabs of vendor delivery-radius snapshots
 const COVERAGE_HISTORY_SPREADSHEET_ID = process.env.COVERAGE_HISTORY_SPREADSHEET_ID || LOCAL_CONFIG.COVERAGE_HISTORY_SPREADSHEET_ID || 'PASTE_YOUR_COVERAGE_HISTORY_SPREADSHEET_ID_HERE'; // per-day tabs of area coverage snapshots
 const LEADS_SPREADSHEET_ID = process.env.LEADS_SPREADSHEET_ID || LOCAL_CONFIG.LEADS_SPREADSHEET_ID || 'PASTE_YOUR_LEADS_SPREADSHEET_ID_HERE'; // M41_Leads: Lead Pool (<Month>) tabs + Overview (Total Vendor Target)
+const DEDICATED_SUPPLY_SPREADSHEET_ID = process.env.DEDICATED_SUPPLY_SPREADSHEET_ID || LOCAL_CONFIG.DEDICATED_SUPPLY_SPREADSHEET_ID || ''; // first tab: Product IDs; optional DedicatedSupplyDaily tab
 
 const SHEET_NAMES = {
   mainData: 'MainData',
@@ -460,6 +462,58 @@ async function main() {
     }
   } catch (err) {
     console.log(`  Skipped — could not read the Leads sheet (${err.message}). Share it with the service account as Viewer and set LEADS_SPREADSHEET_ID in config.local.js.`);
+  }
+
+  // ---- DEDICATED SUPPLY: first-tab Product IDs + optional product-level ledger ----
+  // This is a separate Sheet and must be shared with the LOCAL service account.
+  // A read failure must not break the rest of the dashboard refresh.
+  let dsIdGrid = [], dsDailyRaw = null, dsSourceTab = '';
+  let dsSourceStatus = 'not_configured', dsSourceError = '';
+  if (DEDICATED_SUPPLY_SPREADSHEET_ID) {
+    try {
+      const dsMetadata = await sheets.spreadsheets.get({
+        spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
+        fields: 'sheets(properties(title,index,hidden,sheetType))',
+      });
+      const dsTabs = (dsMetadata.data.sheets || []).map(s => s.properties)
+        .filter(p => !p.hidden && (!p.sheetType || p.sheetType === 'GRID'))
+        .sort((a,b) => a.index - b.index);
+      if (!dsTabs.length) throw new Error('No visible grid tab in Dedicated Supply sheet');
+      const sheetRange = name => "'" + String(name).replace(/'/g,"''") + "'";
+      dsSourceTab = dsTabs[0].title;
+      const dsGridResponse = await sheets.spreadsheets.values.get({
+        spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
+        range: sheetRange(dsSourceTab),
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      dsIdGrid = dsGridResponse.data.values || [];
+      const ledgerTab = dsTabs.find(p => /^(DedicatedSupplyDaily|DS_Daily)$/i.test(p.title));
+      if (ledgerTab) {
+        const ledgerResponse = await sheets.spreadsheets.values.get({
+          spreadsheetId: DEDICATED_SUPPLY_SPREADSHEET_ID,
+          range: sheetRange(ledgerTab.title),
+          valueRenderOption: 'FORMATTED_VALUE',
+        });
+        const grid = ledgerResponse.data.values || [];
+        if (grid.length) {
+          const headers = grid[0];
+          dsDailyRaw = grid.slice(1).map(row => {
+            const obj = {};
+            headers.forEach((h,i) => { obj[h] = row[i] === undefined ? null : row[i]; });
+            return obj;
+          });
+        } else dsDailyRaw = [];
+      }
+      dsSourceStatus = 'ok';
+      console.log('  Dedicated Supply: '+dsIdGrid.length+' source rows from '+dsSourceTab
+        +'; daily ledger '+(dsDailyRaw === null ? 'not available' : dsDailyRaw.length+' rows'));
+    } catch (err) {
+      dsSourceStatus = 'source_error';
+      dsSourceError = String(err.message || err).slice(0,250);
+      console.warn('  Dedicated Supply unavailable — '+dsSourceError);
+    }
+  } else {
+    console.log('  Dedicated Supply skipped — set DEDICATED_SUPPLY_SPREADSHEET_ID in config.local.js');
   }
 
   // ---- FILTER RULE: active (Activity==1 AND Deleted==0), OR PO>0, OR the pack has impressions ----
@@ -1237,6 +1291,19 @@ async function main() {
   const cpoBudgetModule = buildCpoSummary(cpoBudgetRaw);
   console.log(`  CPO summary processed: ${Object.keys(cpoBudgetModule.byCity).length} cities, ${cpoBudgetModule.overall.all.m4oOrders} orders`);
 
+  // Product-level monitoring uses the full MainData universe, including
+  // inactive rows removed from Pack Distribution, to prevent silent exclusions.
+  const dedicatedSupply = buildDedicatedSupply({
+    idGrid: dsIdGrid, mainRows: mainRaw, impressionRows, orderRows: orderRaw,
+    biRows: biRaw, dailyRaw: dsDailyRaw, sourceTab: dsSourceTab,
+  });
+  if (dsSourceStatus !== 'ok') {
+    dedicatedSupply.status = dsSourceStatus;
+    dedicatedSupply.sourceError = dsSourceError;
+  }
+  console.log('  Dedicated Supply: '+dedicatedSupply.summary.tracked+' tracked, '
+    +dedicatedSupply.summary.matched+' mapped products; status '+dedicatedSupply.status);
+
   // ============================================================
   // ASSEMBLE + WRITE
   // ============================================================
@@ -1269,6 +1336,7 @@ async function main() {
     delivery: deliveryOutput,
     coverageHistory: coverageHistoryOutput,
     leads: leadsOutput,
+    dedicatedSupply,
   };
 
   // Compact (no pretty-print indentation) — this file gets encrypted as-is
