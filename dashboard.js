@@ -232,7 +232,7 @@ function renderFilterBar(){
   });
 }
 function filterBarVisible(){
-  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen' || currentPanel === 'cpoBudget' || currentPanel === 'coverageHistory' || currentPanel === 'leads') ? 'none' : '';
+  document.getElementById('filterBarHost').style.display = (currentPanel === 'coverageModel' || currentPanel === 'kitchen' || currentPanel === 'cpoBudget' || currentPanel === 'coverageHistory' || currentPanel === 'leads' || currentPanel === 'dedicatedSupply') ? 'none' : '';
 }
 function matchesSuperType(item){
   if(superTypeFilter === 'all') return true;
