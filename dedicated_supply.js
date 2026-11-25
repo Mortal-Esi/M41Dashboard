@@ -196,6 +196,7 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, impressionSlots
     const rate=numberOf(r.Rate);
     const ord=orderByVendor.get(vendorId);
     const actualPackOrders=numberOf(field(r,['PO']));
+    const actualPackSold=numberOf(field(r,['PS']));
     const seenWindow=packId && bucketsByPack.has(packId)
       ? observedExposure(bucketsByPack.get(packId), impressionSlots)
       : null;
@@ -207,6 +208,7 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, impressionSlots
       snappDiscountToman:price!==null && discountRatio!==null ? price*discountRatio/100 : null,
       impressionsYesterday:packId && impressionByPack.has(packId) ? impressionByPack.get(packId) : null,
       ordersYesterday:actualPackOrders,
+      soldYesterday:actualPackSold,
       observedExposure:seenWindow,
       availabilityStart:null, availabilityEnd:null,
       vendorM41OrdersYesterday:ord ? numberOf(ord.M41VO) : null,
@@ -227,7 +229,9 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, impressionSlots
       ordersYesterday:matched.every(r=>r.ordersYesterday!==null)
         ? matched.reduce((a,r)=>a+r.ordersYesterday,0) : null,
       ordersCoverage:matched.filter(r=>r.ordersYesterday!==null).length,
-      soldYesterday:null,
+      soldYesterday:matched.every(r=>r.soldYesterday!==null)
+        ? matched.reduce((a,r)=>a+r.soldYesterday,0) : null,
+      soldCoverage:matched.filter(r=>r.soldYesterday!==null).length,
       actualAvailabilityCoverage:0,
       observedExposureCoverage:matched.filter(r=>r.observedExposure!==null).length,
       ambiguous:items.filter(r=>r.matchStatus==='ambiguous').length,
