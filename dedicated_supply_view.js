@@ -17,7 +17,13 @@ function dsStatusStyle(status) {
   return status==='ok' ? 'color:var(--seg-a)' : 'color:var(--warn)';
 }
 function dsStat(title,value,detail='',color='') {
-  return '<div class="stat-card"><div class="label">'+escapeHtml(title)+'</div><div class="value small"'+(color?' style="color:'+color+'"':'')+'>'+value+'</div>'+(detail?'<div class="sub">'+detail+'</div>':'')+'</div>';
+  return '<div class="stat-card"><div class="label">'+escapeHtml(title)+'</div><div class="value small"'+(color?' style="color:'+color+'"':'')+'>'+value+'</div></div>';
+}
+function dsAvailabilityStat(available,total,validSource) {
+  const complete=validSource && total>0;
+  const percent=complete ? (available / total * 100).toFixed(1).replace(/\\.0$/,'')+'%' : '—';
+  return '<div class="stat-card"><div class="label">Availability</div><div class="value small" style="color:var(--seg-a)">'+percent+'</div>'+
+    (complete?'<div class="sub">'+fmt(available)+' / '+fmt(total)+'</div>':'')+'</div>';
 }
 function dsSelect(id,label,values,current) {
   return '<label class="flabel" for="'+id+'">'+escapeHtml(label)+'</label><select id="'+id+'" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:8px">'+
@@ -59,6 +65,7 @@ function renderDedicatedSupply(){
     return dsState==='all'||(dsState==='attention' ? st[1]==='warn' : dsState==='seen' ? st[1]==='ok' : r.matchStatus===dsState);
   });
   const mapped=items.filter(r=>r.matchStatus==='matched');
+  const availableCount=items.filter(r=>r.matchStatus==='matched' && r.active && (r.impressionsYesterday||0)>0).length;
   const vendorMap=new Map();
   for(const r of mapped){
     if(!vendorMap.has(r.vendorId)) vendorMap.set(r.vendorId,{
@@ -88,9 +95,7 @@ function renderDedicatedSupply(){
   html+='<div class="stat-row">'+
     dsStat('Tracked IDs',sourceKpi(s.tracked),'Unique PackIDs in Dedicated')+
     dsStat('Daily prepaid capacity',validSource ? dsNumber(s.dailyStockCapacity) : '—','Sum of DailyStock; not current on-hand inventory','var(--purple)')+
-    dsStat('Matched to MainData',sourceKpi(s.matched),'ProductID or fallback PackID')+
-    dsStat('Active in catalog',sourceKpi(s.active),'Of the matched products','var(--seg-a)')+
-    dsStat('Seen yesterday',sourceKpi(s.productsSeenYesterday),'Products with impressions')+
+    dsAvailabilityStat(availableCount,items.length,validSource)+
     dsStat('Pack orders · yesterday',validSource ? dsNumber(s.ordersYesterday) : '—','From MainData.PO; unavailable if incomplete','var(--accent)')+
     dsStat('Pack sold · yesterday',validSource ? dsNumber(s.soldYesterday) : '—','From MainData.PS; unavailable if incomplete','var(--seg-a)')+
     dsStat('Observed exposure',validSource ? dsNumber(s.observedExposureCoverage) : '—','Packs with a nonzero 30-minute impression bucket')+
