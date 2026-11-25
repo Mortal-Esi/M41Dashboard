@@ -350,3 +350,49 @@ matplotlib, seaborn, plotly, jupyterlab, gspread, gspread-dataframe,
 google-auth, google-api-python-client, requests, tqdm. Run it twice on a
 machine without Python (once to install Python, once more in a new window
 for the libraries). Notebooks: `py -m jupyter lab`.
+
+## Dedicated Supply — product-level prepaid inventory monitoring
+
+The **Dedicated Supply** tab is part of the existing encrypted Meal4One dashboard. It does **not** expose the Product IDs or business metrics as a public plaintext file.
+
+### Required source
+
+1. In the existing private `config.local.js`, add:
+   ```js
+   DEDICATED_SUPPLY_SPREADSHEET_ID: 'YOUR_PRIVATE_SHEET_ID',
+   ```
+   The Sheet ID is intentionally **not** committed to GitHub. Keep `config.local.js` gitignored.
+2. Share this Google Sheet as **Viewer** with the email in the `client_email` field of your **local** `service-account.json`. Do not upload or commit the service-account file.
+3. Put the tracked Product IDs in the **first visible tab**. Prefer a header `ProductID` or `Product ID`; the parser also accepts one ID per row in column A without a header. Set the ID column's Google Sheets format to **Plain text** to prevent scientific notation or lost leading zeros. Duplicate IDs are counted and removed.
+4. After pulling the latest dashboard code, run `refresh-dashboard.bat` on the computer containing the local credentials. The encrypted data must be regenerated for the tab to display real values. **GitHub code updates alone do not refresh the encrypted snapshot.**
+
+### Catalog and discovery metrics
+
+- Join list `ProductID` to `MainData.ProductID` when present; otherwise attempt `MainData.PackID`, **explicitly marked as unverified equivalence** until the ID mapping is confirmed.
+- Monitor tracked IDs, matched / unmatched / ambiguous IDs, matched vendors, active vs inactive products, reported price and Snapp discount, and **yesterday's pack impressions**; show city, Marketing Area, vendor and product details.
+- The vendor table includes **all-product M41 orders** as context only. These are **NOT Dedicated Supply product orders** and are never summed as Dedicated Supply volume.
+- Unmatched means “not found in MainData,” **not** “product is missing from the platform.” A matching inactive catalog row is still retained for monitoring.
+
+### Optional daily operations: `DedicatedSupplyDaily` tab
+
+Create an additional tab with **one row per Date × ProductID × VendorID**. Supported column names:
+
+| Required | Optional, for stock / economics |
+| --- | --- |
+| `Date` (YYYY-MM-DD) | `OpeningStockQty` |
+| `ProductID` | `WasteQty` |
+| `VendorID` (required for multi-vendor products) | `ReturnedQty` |
+| `PurchasedQty` (integer) | `ClosingStockQty` |
+| `SoldQty` (integer, **product-level actual sales**) | `UnitCostToman` |
+| | `NetSalesToman` |
+
+Metrics:
+- **Available units** = OpeningStockQty + PurchasedQty (only when opening stock provided).
+- **Sell-through** = SoldQty / Available units. Undefined when available units are missing or zero; never substituted with product impressions or vendor orders.
+- **Expected closing stock** = OpeningStockQty + PurchasedQty − SoldQty − WasteQty − ReturnedQty, only if all required components are present.
+- **Estimated contribution** = NetSalesToman − SoldQty × UnitCostToman, **not fully loaded profit**; excludes any unprovided logistics, vendor incentives, tax, coupon and operational expense.
+- Latest day KPIs, up to 14 days of purchased/sold trends, and product-level daily rows. Optional amounts remain unavailable until all rows for the selected day report them.
+- Duplicate Date × ProductID × VendorID, unlisted products, invalid dates, and stock reconciliation errors are flagged; quality issues must be resolved before interpreting totals as complete.
+
+The first-tab Product ID list **does not itself provide** purchased stock, daily sold units, remaining inventory, refunds or profitability. These require source data with the stated grain/definitions; missing metrics are shown as unavailable, **never zero**. This module intentionally avoids aggregating unrelated M41 vendor-level orders as Dedicated Supply sales.
+
