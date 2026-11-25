@@ -407,3 +407,5 @@ The first-tab Product ID list **does not itself provide** purchased stock, daily
 - Only the explicitly named `Dedicated` tab is included. `Force` is ignored.
 
 The product/pack operational ledger and true availability event history are not yet present in the supplied Sheet. Until they are provided, `Sold` and true availability times remain `—` rather than invented values.
+
+**Current Dedicated Supply quick metrics (yesterday):** `MainData.PO` = orders; `MainData.PS` = sold units as defined by that source. Visible exposure window is derived from the first nonzero half-hour impression bucket through the end of the last one; this is **not verified continuous availability**. The optional daily ledger is not needed for these three metrics, only for inventory/purchase/finance/historical facts. When PS/PO is missing, display unavailable rather than zero. These facts supersede earlier statements that `Sold` requires `DedicatedSupplyDaily`.
