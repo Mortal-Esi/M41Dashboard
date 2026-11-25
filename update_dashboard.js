@@ -1316,7 +1316,8 @@ async function main() {
   // Product-level monitoring uses the full MainData universe, including
   // inactive rows removed from Pack Distribution, to prevent silent exclusions.
   const dedicatedSupply = buildDedicatedSupply({
-    idGrid: dsIdGrid, mainRows: mainRaw, impressionRows, orderRows: orderRaw,
+    idGrid: dsIdGrid, mainRows: mainRaw, impressionRows,
+    impressionSlots: TIME_SLOTS, orderRows: orderRaw,
     biRows: biRaw, dailyRaw: dsDailyRaw, sourceTab: dsSourceTab,
   });
   if (dsSourceStatus !== 'ok') {
