@@ -52,6 +52,7 @@ function renderDedicatedSupply(){
   const daily=ds.daily||{status:'missing',rows:[],days:[],latest:null,issues:[]};
   const selectedDate=dsDate==='latest'||!(daily.days||[]).includes(dsDate)?daily.latest:dsDate;
   const todayRows=(daily.rows||[]).filter(r=>r.date===selectedDate);
+  const soldByPack=new Map(todayRows.map(r=>[String(r.productId)+'|'+String(r.vendorId),r.sold]));
   const ops=dsDailySummary(todayRows);
   const cityItems=items.filter(r=>dsCity==='all'||r.city===dsCity);
   const shown=cityItems.filter(r=>{
@@ -91,6 +92,9 @@ function renderDedicatedSupply(){
     dsStat('Matched to MainData',sourceKpi(s.matched),'ProductID or fallback PackID')+
     dsStat('Active in catalog',sourceKpi(s.active),'Of the matched products','var(--seg-a)')+
     dsStat('Seen yesterday',sourceKpi(s.productsSeenYesterday),'Products with impressions')+
+    dsStat('Pack orders · yesterday',validSource ? dsNumber(s.ordersYesterday) : '—','From MainData.PO; unavailable if incomplete','var(--accent)')+
+    dsStat('Sold qty',validSource && selectedDate ? dsNumber(todayRows.reduce((t,r)=>t+r.sold,0)) : '—','Only from product-level daily ledger')+
+    dsStat('Observed exposure',validSource ? dsNumber(s.observedExposureCoverage) : '—','Packs with a nonzero 30-minute impression bucket')+
     dsStat('Impressions · yesterday',sourceKpi(s.impressionsYesterday),'Not product sales')+
     dsStat('Vendors',sourceKpi(s.vendors),'Distinct matched Vendor IDs')+
     '</div>';
@@ -134,9 +138,9 @@ function renderDedicatedSupply(){
     '<div class="filter-bar">'+dsSelect('dsCity','City',[['all','All cities'],...cities.map(c=>[c,c])],dsCity)+
     dsSelect('dsState','Status',[['all','All statuses'],['attention','Needs attention'],['seen','Seen yesterday'],['not_found','Missing in MainData'],['ambiguous','Ambiguous ID']],dsState)+
     '<input id="dsSearch" placeholder="Search Product ID, vendor or title…" style="min-width:180px;flex:1;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px"></div>'+
-    '<div class="section-note">'+fmt(shown.length)+' of '+fmt(items.length)+' tracked Product IDs in the selected city/status.</div>';
-  html+='<div class="table-wrap" style="max-height:550px;margin-bottom:20px"><table><thead><tr><th>Product ID</th><th>Product</th><th>Vendor / ID</th><th>City</th><th>Marketing Area</th><th>Status</th><th>DailyStock</th><th>Price (T)</th><th>SF Discount (T)</th><th>Impressions Y</th><th>Match key</th></tr></thead><tbody id="dsProductsBody">'+
-    shown.map(r=>{const [status,kind]=dsStatus(r);return '<tr data-ds-search="'+escapeAttr([r.productId,r.title||'',r.vendorName||'',r.vendorId||'',r.city||''].join(' ').toLowerCase())+'"><td style="font-family:var(--mono)">'+escapeHtml(r.productId)+'</td><td>'+escapeHtml(r.title||'—')+'</td><td>'+escapeHtml((r.vendorName||'—')+(r.vendorId?' · '+r.vendorId:''))+'</td><td>'+escapeHtml(r.city||'—')+'</td><td>'+escapeHtml(r.area||'—')+'</td><td style="'+dsStatusStyle(kind)+'">'+escapeHtml(status)+'</td><td>'+dsNumber(r.dailyStock)+'</td><td>'+dsMoney(r.price)+'</td><td>'+dsMoney(r.snappDiscountToman)+'</td><td>'+dsNumber(r.impressionsYesterday)+'</td><td>'+escapeHtml(r.matchedBy||'—')+'</td></tr>';}).join('')+
+    '<div class="section-note">'+fmt(shown.length)+' of '+fmt(items.length)+' tracked PackIDs. Orders Y = pack-level MainData.PO (yesterday). Sold = product-level SoldQty from the selected daily ledger date, when present. Exposure window is the first and last impression buckets, not confirmed online availability; no impressions does not establish that a pack was unavailable.</div>';
+  html+='<div class="table-wrap" style="max-height:550px;margin-bottom:20px"><table><thead><tr><th>Product ID</th><th>Product</th><th>Vendor / ID</th><th>City</th><th>Marketing Area</th><th>Status</th><th>DailyStock</th><th>Orders Y</th><th>Sold</th><th>Actual Available From</th><th>Actual Available To</th><th>First Seen Bucket</th><th>Last Seen Bucket</th><th>Price (T)</th><th>SF Discount (T)</th><th>Impressions Y</th><th>Match key</th></tr></thead><tbody id="dsProductsBody">'+
+    shown.map(r=>{const [status,kind]=dsStatus(r);return '<tr data-ds-search="'+escapeAttr([r.productId,r.title||'',r.vendorName||'',r.vendorId||'',r.city||''].join(' ').toLowerCase())+'"><td style="font-family:var(--mono)">'+escapeHtml(r.productId)+'</td><td>'+escapeHtml(r.title||'—')+'</td><td>'+escapeHtml((r.vendorName||'—')+(r.vendorId?' · '+r.vendorId:''))+'</td><td>'+escapeHtml(r.city||'—')+'</td><td>'+escapeHtml(r.area||'—')+'</td><td style="'+dsStatusStyle(kind)+'">'+escapeHtml(status)+'</td><td>'+dsNumber(r.dailyStock)+'</td><td>'+dsNumber(r.ordersYesterday)+'</td><td>'+dsNumber(soldByPack.has(String(r.productId)+'|'+String(r.vendorId)) ? soldByPack.get(String(r.productId)+'|'+String(r.vendorId)) : null)+'</td><td>'+escapeHtml(r.availabilityStart||'—')+'</td><td>'+escapeHtml(r.availabilityEnd||'—')+'</td><td>'+escapeHtml(r.observedExposure ? r.observedExposure.firstSeenBucket : '—')+'</td><td>'+escapeHtml(r.observedExposure ? r.observedExposure.lastSeenBucket : '—')+'</td><td>'+dsMoney(r.price)+'</td><td>'+dsMoney(r.snappDiscountToman)+'</td><td>'+dsNumber(r.impressionsYesterday)+'</td><td>'+escapeHtml(r.matchedBy||'—')+'</td></tr>';}).join('')+
     '</tbody></table></div>';
   html+='<div class="section-title">Matched vendors — context only</div><div class="section-note">The M41 order counts below cover ALL products of each vendor, not just the Dedicated Supply items; do not sum them as Dedicated Supply sales.</div>'+
     '<div class="table-wrap" style="max-height:380px"><table><thead><tr><th>Vendor / ID</th><th>City</th><th>Area</th><th>Tracked products</th><th>Active</th><th>DS product impressions Y</th><th>All-product M41 orders Y</th><th>All-product M41 orders MTD</th></tr></thead><tbody>'+
