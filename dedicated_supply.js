@@ -109,7 +109,30 @@ function mapDaily(raw, ids) {
   const days = [...new Set(rows.map(r=>r.date))].sort();
   return {status: issues.length ? 'quality_warning' : 'ok', rows, days, latest:days[days.length-1] || null, issues:issues.slice(0,80)};
 }
-function buildDedicatedSupply({idGrid, mainRows, impressionRows, orderRows, biRows, dailyRaw=null, sourceTab=''}) {
+function observedExposure(bySlot, timeSlots) {
+  if (!Array.isArray(bySlot) || !Array.isArray(timeSlots) || bySlot.length !== timeSlots.length) return null;
+  const active = [];
+  for (let i=0;i<bySlot.length;i++) if (Number(bySlot[i])>0) active.push(i);
+  if (!active.length) return null;
+  const first = active[0], last = active[active.length-1];
+  // Observed impressions only. A nonzero 30-minute bucket does NOT prove
+  // continuous availability, and the last bucket can be only partially seen.
+  const toEnd = t => {
+    const match = /^(\d{2}):(\d{2})$/.exec(String(t));
+    if (!match) return null;
+    const m = Number(match[1])*60+Number(match[2])+30;
+    return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  };
+  return {
+    firstSeenBucket:timeSlots[first],
+    lastSeenBucket:timeSlots[last],
+    lastBucketEnd:toEnd(timeSlots[last]),
+    observedBuckets:active.length,
+    totalBuckets:timeSlots.length,
+    meaning:'First/last buckets with impressions; NOT actual available hours',
+  };
+}
+function buildDedicatedSupply({idGrid, mainRows, impressionRows, impressionSlots=null, orderRows, biRows, dailyRaw=null, sourceTab=''}) {
   const parsed = readProductIds(idGrid);
   const productMap = new Map(), packMap = new Map();
   for (const r of mainRows || []) {
@@ -130,10 +153,16 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, orderRows, biRo
     if (id && !areaByVendor.has(id) && textOf(r.Area)) areaByVendor.set(id,textOf(r.Area));
   }
   const impressionByPack = new Map();
+  const bucketsByPack = new Map();
   for (const r of impressionRows || []) {
     const id=idOf(r.PackID);
     if (!id) continue;
     impressionByPack.set(id,(impressionByPack.get(id)||0)+(numberOf(r.total_impression)||0));
+    if(Array.isArray(r.bySlot)){
+      if(!bucketsByPack.has(id)) bucketsByPack.set(id,new Array(r.bySlot.length).fill(0));
+      const buckets=bucketsByPack.get(id);
+      for(let i=0;i<buckets.length;i++) buckets[i]+=(numberOf(r.bySlot[i])||0);
+    }
   }
   const items = parsed.records.map(source => {
     const id = source.id;
@@ -151,13 +180,20 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, orderRows, biRo
     const price=numberOf(r.price), discountRatio=numberOf(r.DiscountSFRatio);
     const rate=numberOf(r.Rate);
     const ord=orderByVendor.get(vendorId);
+    const actualPackOrders=numberOf(field(r,['PO']));
+    const seenWindow=packId && bucketsByPack.has(packId)
+      ? observedExposure(bucketsByPack.get(packId), impressionSlots)
+      : null;
     return {
       productId:id, packId, matchStatus:'matched', matchedBy, dailyStock:source.dailyStock,
       vendorId, vendorName:textOf(r.Title), title:textOf(r.full_title), city:textOf(r.City),
       area:areaByVendor.get(vendorId)||'Unknown', tier:textOf(r.VendorTier),
       kitchen:Number(r.Kitchen)===1, active:isActive, price, rate,
       snappDiscountToman:price!==null && discountRatio!==null ? price*discountRatio/100 : null,
-      impressionsYesterday:packId ? (impressionByPack.get(packId)||0) : null,
+      impressionsYesterday:packId && impressionByPack.has(packId) ? impressionByPack.get(packId) : null,
+      ordersYesterday:actualPackOrders,
+      observedExposure:seenWindow,
+      availabilityStart:null, availabilityEnd:null,
       vendorM41OrdersYesterday:ord ? numberOf(ord.M41VO) : null,
       vendorM41OrdersMtd:ord ? numberOf(ord.NewMonthM41VO) : null,
     };
@@ -173,6 +209,12 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, orderRows, biRo
     summary:{
       tracked:items.length, matched:matched.length,
       dailyStockCapacity:items.every(r=>r.dailyStock!==null) ? items.reduce((a,r)=>a+r.dailyStock,0) : null,
+      ordersYesterday:matched.every(r=>r.ordersYesterday!==null)
+        ? matched.reduce((a,r)=>a+r.ordersYesterday,0) : null,
+      ordersCoverage:matched.filter(r=>r.ordersYesterday!==null).length,
+      soldYesterday:null,
+      actualAvailabilityCoverage:0,
+      observedExposureCoverage:matched.filter(r=>r.observedExposure!==null).length,
       ambiguous:items.filter(r=>r.matchStatus==='ambiguous').length,
       notFound:items.filter(r=>r.matchStatus==='not_found').length,
       active:matched.filter(r=>r.active).length,
@@ -184,4 +226,4 @@ function buildDedicatedSupply({idGrid, mainRows, impressionRows, orderRows, biRo
     }
   };
 }
-module.exports = {readProductIds, mapDaily, buildDedicatedSupply};
+module.exports = {readProductIds, mapDaily, observedExposure, buildDedicatedSupply};
