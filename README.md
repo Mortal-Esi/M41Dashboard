@@ -396,3 +396,14 @@ Metrics:
 
 The first-tab Product ID list **does not itself provide** purchased stock, daily sold units, remaining inventory, refunds or profitability. These require source data with the stated grain/definitions; missing metrics are shown as unavailable, **never zero**. This module intentionally avoids aggregating unrelated M41 vendor-level orders as Dedicated Supply sales.
 
+
+### Orders, sold and availability in the Dedicated Supply tab
+
+- `Orders Y`: **pack-level** `MainData.PO` for yesterday. Never use vendor-wide `M41VO` to infer an individual product's orders. Null indicates unavailable.
+- `Sold`: `SoldQty` from the `DedicatedSupplyDaily` daily ledger for the chosen date, at `Date × ProductID × VendorID` grain. It is not automatically equal to `PO` (different definitions and potentially timing).
+- `Actual Available From` / `Actual Available To`: optional `AvailableFrom` and `AvailableTo` columns, recorded as `HH:MM` on the same daily ledger row. Without a source, report unavailable (not an estimated opening hour).
+- `First Seen Bucket` / `Last Seen Bucket`: derive from nonzero `Impression` half-hour bins (07:00–23:30). These show **observed exposure**, not actual product availability. A zero-impression bin does not mean the product was out of stock or hidden. The impression time series is known not to reconcile perfectly with `total_impression`, so these windows are indicative only.
+- `DailyStock`: contractual daily prepaid capacity from the `Dedicated` tab, distinct from purchased units, actual on-hand units and actual sales.
+- Only the explicitly named `Dedicated` tab is included. `Force` is ignored.
+
+The product/pack operational ledger and true availability event history are not yet present in the supplied Sheet. Until they are provided, `Sold` and true availability times remain `—` rather than invented values.
