@@ -43,7 +43,7 @@ function renderDedicatedSupply(){
   const ds=DATA.dedicatedSupply;
   if(!ds) return '<div class="empty-state">Dedicated Supply was added to the dashboard code, but the encrypted data snapshot is older. Run the local dashboard refresh to populate this tab.</div>';
   const sourceIssue=ds.status==='not_configured'?'Set DEDICATED_SUPPLY_SPREADSHEET_ID in config.local.js and share the Sheet with the dashboard service account.':
-    ds.status==='source_error'?'The dedicated Sheet could not be read during the latest refresh. Check access and tab structure.':
+    ds.status==='source_error'?(/quota|read requests per minute/i.test(ds.sourceError||'')?'Google Sheets API read quota was exceeded during refresh. Retry the refresh; if recurring, reduce simultaneous Google Sheets requests.':'The Dedicated sheet could not be read during refresh. Check access and tab structure.'):
     ds.status==='empty_ids'?'The first tab has no readable Product IDs.':'';
   const items=ds.items||[], s=ds.summary||{};
   const validSource = ds.status==='ok' || ds.status==='empty_ids';
@@ -82,11 +82,12 @@ function renderDedicatedSupply(){
   const byCitySorted=[...byCity.values()].sort((a,b)=>b.count-a.count);
   const maxCity=Math.max(1,...byCitySorted.map(v=>v.count));
   let html='<div class="section-title" style="margin-top:0">Dedicated Supply — Prepaid Inventory</div>'+
-    '<div class="section-note">Product IDs from the first tab of the dedicated Sheet. Catalog and visibility metrics come from MainData / Impression; purchase, sales and margin require a separate daily operations feed. This is not an attribution of vendor M41 orders to these products.</div>';
+    '<div class="section-note">Only the Dedicated tab is used (Force excluded). PackID and DailyStock are read directly from that tab. DailyStock is contracted daily capacity, not observed on-hand stock or confirmed sales. Catalog and impressions come from MainData / Impression; purchases and margins require operational data.</div>';
   if(sourceIssue) html+='<div class="detail-panel" style="border-color:var(--warn)"><b style="color:var(--warn)">Source setup required</b><div class="section-note" style="margin:8px 0 0">'+escapeHtml(sourceIssue)+'</div></div>';
   if(ds.status==='source_error'&&ds.sourceError) html+='<div class="section-note">Read error: '+escapeHtml(ds.sourceError)+'</div>';
   html+='<div class="stat-row">'+
-    dsStat('Tracked IDs',sourceKpi(s.tracked),'Unique values in source tab')+
+    dsStat('Tracked IDs',sourceKpi(s.tracked),'Unique PackIDs in Dedicated')+
+    dsStat('Daily prepaid capacity',validSource ? dsNumber(s.dailyStockCapacity) : '—','Sum of DailyStock; not current on-hand inventory','var(--purple)')+
     dsStat('Matched to MainData',sourceKpi(s.matched),'ProductID or fallback PackID')+
     dsStat('Active in catalog',sourceKpi(s.active),'Of the matched products','var(--seg-a)')+
     dsStat('Seen yesterday',sourceKpi(s.productsSeenYesterday),'Products with impressions')+
@@ -134,8 +135,8 @@ function renderDedicatedSupply(){
     dsSelect('dsState','Status',[['all','All statuses'],['attention','Needs attention'],['seen','Seen yesterday'],['not_found','Missing in MainData'],['ambiguous','Ambiguous ID']],dsState)+
     '<input id="dsSearch" placeholder="Search Product ID, vendor or title…" style="min-width:180px;flex:1;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px"></div>'+
     '<div class="section-note">'+fmt(shown.length)+' of '+fmt(items.length)+' tracked Product IDs in the selected city/status.</div>';
-  html+='<div class="table-wrap" style="max-height:550px;margin-bottom:20px"><table><thead><tr><th>Product ID</th><th>Product</th><th>Vendor / ID</th><th>City</th><th>Marketing Area</th><th>Status</th><th>Price (T)</th><th>SF Discount (T)</th><th>Impressions Y</th><th>Match key</th></tr></thead><tbody id="dsProductsBody">'+
-    shown.map(r=>{const [status,kind]=dsStatus(r);return '<tr data-ds-search="'+escapeAttr([r.productId,r.title||'',r.vendorName||'',r.vendorId||'',r.city||''].join(' ').toLowerCase())+'"><td style="font-family:var(--mono)">'+escapeHtml(r.productId)+'</td><td>'+escapeHtml(r.title||'—')+'</td><td>'+escapeHtml((r.vendorName||'—')+(r.vendorId?' · '+r.vendorId:''))+'</td><td>'+escapeHtml(r.city||'—')+'</td><td>'+escapeHtml(r.area||'—')+'</td><td style="'+dsStatusStyle(kind)+'">'+escapeHtml(status)+'</td><td>'+dsMoney(r.price)+'</td><td>'+dsMoney(r.snappDiscountToman)+'</td><td>'+dsNumber(r.impressionsYesterday)+'</td><td>'+escapeHtml(r.matchedBy||'—')+'</td></tr>';}).join('')+
+  html+='<div class="table-wrap" style="max-height:550px;margin-bottom:20px"><table><thead><tr><th>Product ID</th><th>Product</th><th>Vendor / ID</th><th>City</th><th>Marketing Area</th><th>Status</th><th>DailyStock</th><th>Price (T)</th><th>SF Discount (T)</th><th>Impressions Y</th><th>Match key</th></tr></thead><tbody id="dsProductsBody">'+
+    shown.map(r=>{const [status,kind]=dsStatus(r);return '<tr data-ds-search="'+escapeAttr([r.productId,r.title||'',r.vendorName||'',r.vendorId||'',r.city||''].join(' ').toLowerCase())+'"><td style="font-family:var(--mono)">'+escapeHtml(r.productId)+'</td><td>'+escapeHtml(r.title||'—')+'</td><td>'+escapeHtml((r.vendorName||'—')+(r.vendorId?' · '+r.vendorId:''))+'</td><td>'+escapeHtml(r.city||'—')+'</td><td>'+escapeHtml(r.area||'—')+'</td><td style="'+dsStatusStyle(kind)+'">'+escapeHtml(status)+'</td><td>'+dsNumber(r.dailyStock)+'</td><td>'+dsMoney(r.price)+'</td><td>'+dsMoney(r.snappDiscountToman)+'</td><td>'+dsNumber(r.impressionsYesterday)+'</td><td>'+escapeHtml(r.matchedBy||'—')+'</td></tr>';}).join('')+
     '</tbody></table></div>';
   html+='<div class="section-title">Matched vendors — context only</div><div class="section-note">The M41 order counts below cover ALL products of each vendor, not just the Dedicated Supply items; do not sum them as Dedicated Supply sales.</div>'+
     '<div class="table-wrap" style="max-height:380px"><table><thead><tr><th>Vendor / ID</th><th>City</th><th>Area</th><th>Tracked products</th><th>Active</th><th>DS product impressions Y</th><th>All-product M41 orders Y</th><th>All-product M41 orders MTD</th></tr></thead><tbody>'+
